@@ -1,0 +1,28 @@
+# Build artifacts
+build/
+out/
+target/
+*.class
+.gradle/
+loom-cache/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+*.launch
+
+# Minecraft
+run/
+runs/
+
+# Gradle wrapper (we commit these normally, but ignore downloaded gradle)
+gradle/wrapper/gradle-wrapper.jar.orig
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp

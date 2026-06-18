@@ -1,0 +1,21 @@
+# Build artifacts
+java-edition/build/
+java-edition/out/
+java-edition/.gradle/
+java-edition/loom-cache/
+
+# Packaged mcpack files (generated on release)
+*.mcpack
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Gradle wrapper jar (committed normally by gradle, but ignored here unless present)
+java-edition/gradle/wrapper/gradle-wrapper.jar

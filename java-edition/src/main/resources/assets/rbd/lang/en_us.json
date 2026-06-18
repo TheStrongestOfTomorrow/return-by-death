@@ -1,0 +1,12 @@
+{
+  "itemGroup.rbd.main": "Return By Death",
+  "rbd.return_by_death": "Return By Death triggers",
+  "rbd.message.save_point_created": "Save point created",
+  "rbd.message.returned_by_death": "Returned By Death",
+  "rbd.message.no_save_point": "No save point exists yet - dying now would be permanent!",
+  "rbd.message.instant_respawn_required": "Return By Death requires Instant Respawn (doImmediateRespawn) to be enabled.",
+  "rbd.message.instant_respawn_enabled": "Return By Death has enabled Instant Respawn for you.",
+  "rbd.message.save_point_set": "Manual save point set at %s, %s, %s",
+  "rbd.message.cooldown_active": "Return By Death is on cooldown: %s seconds remaining",
+  "death.attack.return_by_death": "%s was killed but Returned By Death"
+}
