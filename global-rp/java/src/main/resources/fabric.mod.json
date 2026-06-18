@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "rbd_globalrp",
+  "version": "${version}",
+  "name": "Return By Death - Global RP (Client-Side)",
+  "description": "Client-side only mod. Plays the iconic Return By Death sound whenever YOU die. Works on ANY server (vanilla or modded) - no server install required. Inspired by Subaru Natsuki's ability from Re:Zero.",
+  "authors": [
+    "Return By Death Mod Team"
+  ],
+  "contact": {
+    "homepage": "https://github.com/TheStrongestOfTomorrow/return-by-death",
+    "sources": "https://github.com/TheStrongestOfTomorrow/return-by-death",
+    "issues": "https://github.com/TheStrongestOfTomorrow/return-by-death/issues"
+  },
+  "license": "MIT",
+  "icon": "assets/rbd_globalrp/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.rezero.rbd.globalrp.ReturnByDeathGlobalRP"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "~1.20.1",
+    "java": ">=17",
+    "fabric-api": "*"
+  }
+}

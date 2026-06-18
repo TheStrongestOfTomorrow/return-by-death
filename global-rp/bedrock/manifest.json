@@ -1,0 +1,25 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Return By Death - Global RP (Client-Side)",
+    "description": "§d§lReturn By Death - Global Resource Pack§r\n\n§aClient-side only! Works on ANY server. No behavior pack needed. No server install. Just install this resource pack globally and you'll hear the iconic Return By Death sound whenever YOU die.\n\n§7Inspired by Subaru Natsuki's ability from Re:Zero. The sound replaces the vanilla 'big fall' sound (damage.fallbig) which is the sound Bedrock plays when a player dies — so it triggers on your death specifically, with no false positives from regular fall damage (those use damage.fallsmall).",
+    "uuid": "e1f2a3b4-c5d6-4a7b-8c9d-0e1f2a3b4c5d",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 21, 0]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "f2a3b4c5-d6e7-4b8c-9d0e-1f2a3b4c5d6e",
+      "version": [1, 0, 0]
+    }
+  ],
+  "metadata": {
+    "authors": ["Return By Death Mod Team"],
+    "license": "MIT",
+    "url": "https://github.com/TheStrongestOfTomorrow/return-by-death",
+    "generated_with": {
+      "global_rp_tool": ["1.0.0"]
+    }
+  }
+}

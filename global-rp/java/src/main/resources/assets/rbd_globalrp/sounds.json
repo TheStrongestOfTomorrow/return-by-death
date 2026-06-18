@@ -1,0 +1,12 @@
+{
+  "return_by_death": {
+    "category": "player",
+    "subtitle": "rbd_globalrp.return_by_death",
+    "sounds": [
+      {
+        "name": "rbd_globalrp:return_by_death",
+        "stream": false
+      }
+    ]
+  }
+}

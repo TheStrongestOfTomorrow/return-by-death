@@ -1,0 +1,11 @@
+{
+  "rbd_globalrp.return_by_death": "Return By Death triggers",
+  "rbd_globalrp.message.enabled": "Return By Death Global RP enabled. Will play sound on your death.",
+  "rbd_globalrp.message.disabled": "Return By Death Global RP disabled.",
+  "rbd_globalrp.message.test_sound": "Playing Return By Death sound...",
+  "rbd_globalrp.message.toggled": "Return By Death Global RP: %s",
+  "rbd_globalrp.message.loop_count": "Death count this session: %s",
+  "rbd_globalrp.key.toggle": "Toggle Return By Death Sound",
+  "rbd_globalrp.key.test": "Test Return By Death Sound",
+  "rbd_globalrp.key.category": "Return By Death"
+}

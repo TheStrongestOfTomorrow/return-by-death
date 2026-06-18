@@ -1,0 +1,15 @@
+{
+  "format_version": "1.14.0",
+  "sound_definitions": {
+    "damage.fallbig": {
+      "category": "player",
+      "sounds": [
+        {
+          "name": "sounds/return_by_death",
+          "volume": 1.0,
+          "pitch": 1.0
+        }
+      ]
+    }
+  }
+}
