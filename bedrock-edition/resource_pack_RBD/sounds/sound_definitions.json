@@ -3,11 +3,10 @@
   "sound_definitions": {
     "rbd.return_by_death": {
       "category": "neutral",
-      "max_distance": 10000,
       "sounds": [
         {
           "name": "sounds/return_by_death",
-          "volume": 4.0
+          "volume": 1.0
         }
       ]
     }

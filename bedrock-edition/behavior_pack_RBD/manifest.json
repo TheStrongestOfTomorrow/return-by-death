@@ -2,22 +2,22 @@
   "format_version": 2,
   "header": {
     "name": "Return By Death - Behavior Pack",
-    "description": "Re:Zero-inspired Return By Death mechanic for Bedrock Edition (including Pocket Edition). v1.2.4 HOTFIX: RBD sound now plays LOUD - boosted to 4x volume with max_distance 10000 (audible server-wide). Also replays sound on respawn since dying players can't hear during the death screen.",
+    "description": "Re:Zero-inspired Return By Death mechanic for Bedrock Edition (including Pocket Edition). v1.2.5 HOTFIX: Fixes v1.2.4 regression - rolled back risky sound_definitions.json values (max_distance:10000 + volume:4.0 caused RP load failure on some Bedrock versions, breaking the whole script). Now uses safe volume 1.0 (the OGG itself is already 6x louder from v1.2.4). All playSound calls wrapped in try/catch so sound issues never break death/respawn logic.",
     "uuid": "f1a2c3d4-5b6e-4f7a-8b9c-0d1e2f3a4b5c",
-    "version": [1, 2, 4],
+    "version": [1, 2, 5],
     "min_engine_version": [1, 21, 0]
   },
   "modules": [
     {
       "type": "data",
       "uuid": "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
-      "version": [1, 2, 4]
+      "version": [1, 2, 5]
     },
     {
       "type": "script",
       "language": "javascript",
       "uuid": "b2c3d4e5-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
-      "version": [1, 2, 4],
+      "version": [1, 2, 5],
       "entry": "scripts/main.js"
     }
   ],
@@ -32,7 +32,7 @@
     },
     {
       "uuid": "c3d4e5f6-7a8b-4c9d-0e1f-2a3b4c5d6e7f",
-      "version": [1, 2, 4]
+      "version": [1, 2, 5]
     }
   ],
   "metadata": {
