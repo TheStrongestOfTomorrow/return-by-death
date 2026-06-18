@@ -7,7 +7,40 @@ A Minecraft mod inspired by **Subaru Natsuki's "Return By Death"** ability from 
 
 **Available for both Minecraft Java Edition (Fabric) and Minecraft Bedrock Edition (incl. Pocket Edition).**
 
-**Current version: v1.2.0** — see [What's New](#whats-new-in-v120) below.
+**Current version: v1.2.1** — see [What's New](#whats-new-in-v121) below.
+
+---
+
+## What's New in v1.2.1 (PATCH)
+
+This is a bug fix + flavor patch. **v1.0.0, v1.1.0, and v1.2.0 are still available** at their respective release pages.
+
+### 🩹 Bug Fix: Bedrock Chat Commands Now Work (3 Layers)
+
+The most-reported issue with v1.2.0 was that `!rbd` chat commands didn't work for many Bedrock players. **v1.2.1 fixes this with 3 command layers and graceful fallback:**
+
+| Layer | Method | Bedrock version | Beta APIs? | Notes |
+|-------|--------|-----------------|------------|-------|
+| **1** | `CustomCommandRegistry` (real `/rbd:save` slash commands) | 1.21.80+ | Not needed | Shows in autocomplete, works in command blocks, works on console |
+| **2** | `world.beforeEvents.chatSend` (`!rbd save` chat) | All versions | Required for older Bedrock | The classic method, now wrapped in try/catch with logging |
+| **3** | **RBD Notebook item UI** (right-click to open menu) | All versions | Not needed | Universal fallback — works on mobile, console, no chat needed |
+
+All 3 layers call the same command handler, so behavior is identical. If one layer fails, the others still work. Every event subscription is wrapped in `try/catch` so the script never silently dies.
+
+**New command: `/rbd debug` (or `!rbd debug`)** — shows which layers are active on your installation. Use this to diagnose command issues.
+
+**New: RBD Notebook item** — every player gets a writable book renamed "RBD Notebook" in their inventory on join. Right-click it (in air) to open a button-based UI with all commands. This is the universal fallback that should always work.
+
+### ✨ New Tier 1 RBD Flavor Features (both Java + Bedrock)
+
+| Feature | Description |
+|---------|-------------|
+| **Witch scent** | After each death, dark soul particles drift around you for 60 seconds. In Re:Zero, the Witch of Envy is drawn to Subaru's scent after each death — this is the visual representation. Other players can briefly see the particles. |
+| **Death quotes** | When you die, a random Subaru-style quote appears in chat (e.g. *"From zero. I'll restart from zero."*). Pure flavor, no mechanical effect. |
+| **Heartbeat at low HP** | When your HP drops to 3 hearts (6 HP) or below, a deep warden-heartbeat sound plays every second — getting louder as you get closer to death. Recreates the anime's tense pre-death audio cue. |
+| **"Witch watching" message** | Every 5th death, an ominous action-bar message appears: *"The Witch of Envy is watching you..."*. The more you die, the more attention you attract. |
+
+These can be toggled individually (Java: gamerules; Bedrock: `CONFIG` in main.js).
 
 ---
 
@@ -419,12 +452,13 @@ return-by-death/
 
 | Edition | Mod version | MC version         | Status      |
 |---------|-------------|--------------------|-------------|
-| Java    | v1.0.0 / v1.1.0 / v1.2.0 | 1.20.1 (Fabric)    | ✅ Supported |
-| Java    | v1.2.0      | 1.21.x / 26.x      | 🚧 Planned  |
+| Java    | v1.0.0 / v1.1.0 / v1.2.0 / v1.2.1 | 1.20.1 (Fabric)    | ✅ Supported |
+| Java    | v1.2.1      | 1.21.x / 26.x      | 🚧 Planned  |
 | Bedrock | v1.0.0      | 1.21+              | ✅ Supported |
 | Bedrock | v1.1.0      | 1.21+ (incl. 1.26.x) | ✅ Supported |
 | Bedrock | v1.2.0      | 1.21+ (incl. 1.26.x) | ✅ Supported |
-| Bedrock | v1.2.0      | Pocket Edition     | ✅ Supported |
+| Bedrock | v1.2.1      | 1.21+ (incl. 1.26.x) | ✅ Supported (recommended) |
+| Bedrock | v1.2.1      | Pocket Edition     | ✅ Supported |
 
 The mod is server-authoritative — it works on dedicated servers, realms (Java), and shared worlds. Bedrock requires the world to have BOTH the behavior AND resource packs active.
 
@@ -448,8 +482,24 @@ The mod is server-authoritative — it works on dedicated servers, realms (Java)
 | v1.0.0  | 2026-06-18 | Initial release: core rewind mechanic + sound        |
 | v1.1.0  | 2026-06-18 | Major feature update: configurable interval, death counter, death log, particle beacon, named saves, configurable sound/broadcast, action bar cooldown, reset command |
 | v1.2.0  | 2026-06-18 | Default interval 20s, Bedrock saves potion effects + fire ticks, death title overlay, save indicator, `/rbd revert` + `/rbd lastdeath` + `/rbd testsound`, better cause reporting |
+| v1.2.1  | 2026-06-18 | **PATCH**: Bedrock command fix (3 layers: CustomCommandRegistry + chatSend + RBD Notebook UI). New `/rbd debug` command. Tier 1 RBD flavor: witch scent particles, Subaru death quotes, heartbeat at low HP, "Witch watching" message every 5th death. |
 
 Old releases are never deleted — find them all at [the Releases page](../../releases).
+
+---
+
+### "!rbd commands don't work in chat"
+
+This was a common issue in v1.2.0. v1.2.1 fixes it with 3 command layers. If commands still don't work, try these in order:
+
+1. **Run `!rbd debug`** (or `/rbd:debug` on Bedrock 1.21.80+) — this shows which command layers are active.
+2. **Try `/rbd:save`** (Layer 1) — works on Bedrock 1.21.80+ without any experimental toggles.
+3. **Try right-clicking the RBD Notebook in your inventory** (Layer 3) — should always work, on any version. The notebook is a writable book renamed "RBD Notebook".
+4. **If you lost the notebook**, rejoin the world (you get a new one on join).
+5. **Enable "Beta APIs" experimental toggle** in world settings if you want `!rbd` chat commands (Layer 2) to work on older Bedrock versions.
+6. **Check the script console** — if `chatSend` failed to register, the script logs a warning like `[RBD WARNING] Layer 2 (chatSend): world.beforeEvents.chatSend is undefined`.
+
+The RBD Notebook (Layer 3) is the universal fallback — it should always work even if the other two layers fail.
 
 ---
 

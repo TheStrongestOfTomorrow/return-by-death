@@ -44,7 +44,7 @@ public class ReturnByDeathMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("[Return By Death v1.2.0] Initializing - 'I will save you, no matter how many times I have to die.'");
+        LOGGER.info("[Return By Death v1.2.1] Initializing - 'I will save you, no matter how many times I have to die.'");
 
         // Register custom gamerules
         RBDGameRules.register();
@@ -58,14 +58,14 @@ public class ReturnByDeathMod implements ModInitializer {
             ensureInstantRespawn(server);
             SaveManager.touch(player);
             int interval = RBDGameRules.saveIntervalSeconds(server);
-            player.sendMessage(Text.literal("\u00a7d\u00a7l[Return By Death v1.2.0] \u00a7r\u00a77A save point is created every \u00a7e" + interval + "s\u00a77. Die, and rewind."), false);
+            player.sendMessage(Text.literal("\u00a7d\u00a7l[Return By Death v1.2.1] \u00a7r\u00a77A save point is created every \u00a7e" + interval + "s\u00a77. Die, and rewind."), false);
             player.sendMessage(Text.literal("\u00a77  Type \u00a7e/rbd help\u00a77 for commands. Particles mark your save point."), false);
         });
 
         // Register commands
         RBDCommands.register();
 
-        LOGGER.info("[Return By Death v1.2.0] Initialization complete. May the Witch of Envy have mercy.");
+        LOGGER.info("[Return By Death v1.2.1] Initialization complete. May the Witch of Envy have mercy.");
     }
 
     private void onServerTick(MinecraftServer server) {
@@ -93,6 +93,14 @@ public class ReturnByDeathMod implements ModInitializer {
         if (server.getTicks() % 20 == 0) {
             SavePointBeacon.tick(server);
         }
+
+        // v1.2.1: Witch scent particles - tick every 2 seconds (every 40 ticks)
+        if (server.getTicks() % 40 == 0) {
+            WitchScentHandler.tick(server);
+        }
+
+        // v1.2.1: Heartbeat sound at low HP - ticked every tick (the handler checks internally)
+        HeartbeatHandler.tick(server);
     }
 
     private void ensureInstantRespawn(MinecraftServer server) {

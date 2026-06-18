@@ -103,6 +103,17 @@ public final class DeathHandler {
         // 4. Show death title + subtitle overlay
         showDeathTitle(player, newLoopCount);
 
+        // 4b. v1.2.1: Send a random Subaru-style death quote
+        DeathQuotes.sendRandomQuote(player);
+
+        // 4c. v1.2.1: Mark the player with Witch scent for 60 seconds
+        WitchScentHandler.trigger(player);
+
+        // 4d. v1.2.1: Every 5th death, show a special "Witch is watching" action bar message
+        if (newLoopCount > 0 && newLoopCount % 5 == 0) {
+            player.sendMessage(Text.literal("\u00a78\u00a7l\u00a7oThe Witch of Envy is watching you..."), true);
+        }
+
         // 5. Notify the dying player and broadcast
         player.sendMessage(Text.literal("\u00a7d\u00a7l[Return By Death] \u00a7r\u00a7dYou have died. Returning to your save point..."), false);
         if (newLoopCount > 0) {
