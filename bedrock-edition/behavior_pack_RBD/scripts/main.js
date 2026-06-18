@@ -1,8 +1,16 @@
 /**
- * Return By Death - Bedrock Edition (incl. Pocket Edition) - v1.2.1 PATCH
+ * Return By Death - Bedrock Edition (incl. Pocket Edition) - v1.2.2 HOTFIX
  * =======================================================================
  *
  * Inspired by Subaru Natsuki's ability from Re:Zero.
+ *
+ * v1.2.2 HOTFIX: Layer 1 (CustomCommandRegistry) was broken in v1.2.1 because it
+ *   registered commands but used a non-existent 'system.afterEvents.customCommand'
+ *   event for execution. Fixed by passing the execution callback directly to
+ *   registerCommand() as the second argument (per Bedrock Wiki / MS Learn docs).
+ *   Also added: cheatsRequired: false so commands work without cheats enabled,
+ *   CommandPermissionLevel enum import, mandatoryParameters support for /rbd:named <name>,
+ *   /rbd:interval <sec>, etc.
  *
  * v1.2.1 PATCH NOTES:
  *
@@ -52,6 +60,9 @@ import {
   system,
   EquipmentSlot,
   GameMode,
+  CommandPermissionLevel,
+  CustomCommandParamType,
+  CustomCommandStatus,
 } from "@minecraft/server";
 
 // ============================ Configuration ============================
@@ -794,6 +805,21 @@ function revertPlayer(player) {
 }
 
 // ============================ v1.2.1 LAYER 1: CustomCommandRegistry (Bedrock 1.21.80+) ============================
+// v1.2.2 HOTFIX: previous version registered commands but used a non-existent
+// 'system.afterEvents.customCommand' event to handle execution. The correct pattern
+// is to pass the execution callback AS THE SECOND ARGUMENT to registerCommand().
+//
+// CustomCommand enums (CommandPermissionLevel, CustomCommandParamType, CustomCommandStatus)
+// are imported at the top of the file via the static `import { ... } from "@minecraft/server"`.
+// If those imports fail (older @minecraft/server version), we fall back to numeric values
+// that match the official enum values for @minecraft/server 1.14.0.
+
+// Fallback enum values if static import didn't expose them (shouldn't happen on 1.14.0+)
+const PERM_ANY = CommandPermissionLevel?.Any ?? 0;
+const PERM_GAME_DIRECTORS = CommandPermissionLevel?.GameDirectors ?? 1;
+const PARAM_STRING = CustomCommandParamType?.String ?? "String";
+const STATUS_SUCCESS = CustomCommandStatus?.Success ?? 0;
+const STATUS_FAILURE = CustomCommandStatus?.Failure ?? 1;
 
 try {
   if (system.beforeEvents && typeof system.beforeEvents.startup !== "undefined") {
@@ -801,97 +827,135 @@ try {
       try {
         const registry = event.customCommandRegistry;
         if (!registry || typeof registry.registerCommand !== "function") {
-          warn("CustomCommandRegistry not available on this Bedrock version (need 1.21.80+).");
+          warn("Layer 1: CustomCommandRegistry.registerCommand is not a function. Need Bedrock 1.21.80+.");
           return;
         }
 
-        // Register /rbd:<subcommand> for each player command
-        const playerCommands = [
-          "save", "info", "status", "loops", "looplog", "lastdeath",
-          "revert", "testsound", "reset", "debug", "help"
-        ];
-        for (const cmd of playerCommands) {
+        // Helper to register a no-parameter command with an execution callback
+        function registerSimple(name, description, permLevel, cheatsRequired) {
           try {
             registry.registerCommand({
-              name: `rbd:${cmd}`,
-              description: `Return By Death - ${cmd}`,
-              permissionLevel: 0,
+              name: name,
+              description: description,
+              permissionLevel: permLevel,
+              cheatsRequired: cheatsRequired,
+            }, (origin) => {
+              try {
+                const player = origin?.sourceEntity;
+                if (!player || !player.typeId || player.typeId !== "minecraft:player") {
+                  return { status: STATUS_FAILURE, message: "Only players can use this command." };
+                }
+                const sub = name.substring("rbd:".length); // strip "rbd:"
+                let parts = [sub];
+                if (sub === "named_list") parts = ["named", "list"];
+                if (sub === "named_delete") parts = ["named", "delete"];
+                system.run(() => {
+                  try { handleCommand(player, parts[0], parts); }
+                  catch (e) { warn("Layer 1 command handler error:", e); announce(player, "\u00a7cCommand error: " + e); }
+                });
+                return { status: STATUS_SUCCESS };
+              } catch (e) {
+                warn(`Layer 1: handler for ${name} failed:`, e);
+                return { status: STATUS_FAILURE, message: String(e) };
+              }
             });
+            return true;
           } catch (e) {
-            warn(`Failed to register /rbd:${cmd}:`, e);
+            warn(`Layer 1: failed to register ${name}:`, e);
+            return false;
           }
         }
 
-        // Register /rbd:named and its subcommands as separate commands
-        try {
-          registry.registerCommand({
-            name: "rbd:named",
-            description: "Return By Death - named save points (use /rbd:named_list, /rbd:named_delete)",
-            permissionLevel: 0,
-          });
-        } catch (e) { warn("Failed to register /rbd:named:", e); }
-
-        try {
-          registry.registerCommand({ name: "rbd:named_list", description: "List your named save points", permissionLevel: 0 });
-          registry.registerCommand({ name: "rbd:named_delete", description: "Delete a named save point", permissionLevel: 0 });
-        } catch (e) { warn("Failed to register /rbd:named_*:", e); }
-
-        // Op commands
-        const opCommands = [
-          "interval", "cooldown", "broadcast", "radius",
-          "volume", "pitch", "maxnamed", "mod"
-        ];
-        for (const cmd of opCommands) {
+        // Helper to register a command with one string parameter
+        function registerWithStringParam(name, description, permLevel, cheatsRequired, paramName) {
           try {
             registry.registerCommand({
-              name: `rbd:${cmd}`,
-              description: `Return By Death (op) - ${cmd}`,
-              permissionLevel: 1,
+              name: name,
+              description: description,
+              permissionLevel: permLevel,
+              cheatsRequired: cheatsRequired,
+              mandatoryParameters: [
+                { name: paramName, type: PARAM_STRING },
+              ],
+            }, (origin, value) => {
+              try {
+                const player = origin?.sourceEntity;
+                if (!player || player.typeId !== "minecraft:player") {
+                  return { status: STATUS_FAILURE, message: "Only players can use this command." };
+                }
+                const sub = name.substring("rbd:".length);
+                // All parametric commands just pass the value as parts[2]
+                const parts = [sub, undefined, String(value)];
+                system.run(() => {
+                  try { handleCommand(player, parts[0], parts); }
+                  catch (e) { warn("Layer 1 command handler error:", e); announce(player, "\u00a7cCommand error: " + e); }
+                });
+                return { status: STATUS_SUCCESS };
+              } catch (e) {
+                warn(`Layer 1: handler for ${name} failed:`, e);
+                return { status: STATUS_FAILURE, message: String(e) };
+              }
             });
+            return true;
           } catch (e) {
-            warn(`Failed to register /rbd:${cmd}:`, e);
+            warn(`Layer 1: failed to register ${name}:`, e);
+            return false;
           }
+        }
+
+        // Player commands (no params): permissionLevel Any, cheatsRequired false
+        const playerSimple = ["save", "info", "status", "loops", "looplog", "lastdeath", "revert", "testsound", "reset", "debug", "help"];
+        let playerRegistered = 0;
+        for (const cmd of playerSimple) {
+          if (registerSimple(`rbd:${cmd}`, `Return By Death - ${cmd}`, PERM_ANY, false)) playerRegistered++;
+        }
+
+        // /rbd:named <name> - takes a string parameter
+        let namedRegistered = 0;
+        if (registerWithStringParam("rbd:named", "Create a named save point", PERM_ANY, false, "name")) namedRegistered++;
+        // /rbd:named_list - simple (no params)
+        if (registerSimple("rbd:named_list", "List your named save points", PERM_ANY, false)) namedRegistered++;
+        // /rbd:named_delete <name>
+        if (registerWithStringParam("rbd:named_delete", "Delete a named save point", PERM_ANY, false, "name")) namedRegistered++;
+
+        // /rbd:particles <on|off> - string param
+        let particlesRegistered = 0;
+        if (registerWithStringParam("rbd:particles", "Toggle save point particles (on|off)", PERM_ANY, false, "state")) particlesRegistered++;
+
+        // Op commands: permissionLevel GameDirectors (== 1, requires op), cheatsRequired false
+        const opNumeric = [
+          { name: "rbd:interval", desc: "Set save interval (1-600 sec)", param: "seconds" },
+          { name: "rbd:cooldown", desc: "Set cooldown (0-3600 sec)", param: "seconds" },
+          { name: "rbd:radius", desc: "Set broadcast radius (-1 = global)", param: "blocks" },
+          { name: "rbd:volume", desc: "Set sound volume (0-100%)", param: "percent" },
+          { name: "rbd:pitch", desc: "Set sound pitch (50-200%)", param: "percent" },
+          { name: "rbd:maxnamed", desc: "Set max named save points (0-20)", param: "count" },
+        ];
+        let opNumericRegistered = 0;
+        for (const c of opNumeric) {
+          if (registerWithStringParam(c.name, c.desc, PERM_GAME_DIRECTORS, false, c.param)) opNumericRegistered++;
+        }
+
+        // Op toggle commands (on|off)
+        const opToggle = ["broadcast", "mod"];
+        let opToggleRegistered = 0;
+        for (const cmd of opToggle) {
+          if (registerWithStringParam(`rbd:${cmd}`, `Return By Death (op) - ${cmd} <on|off>`, PERM_GAME_DIRECTORS, false, "state")) opToggleRegistered++;
         }
 
         LAYERS.customCommand = true;
-        log("Layer 1 (CustomCommandRegistry): registered " + (playerCommands.length + 3 + opCommands.length) + " commands");
+        const total = playerRegistered + namedRegistered + particlesRegistered + opNumericRegistered + opToggleRegistered;
+        log(`Layer 1 (CustomCommandRegistry): registered ${total} commands (${playerRegistered} player, ${namedRegistered} named, ${particlesRegistered} particles, ${opNumericRegistered + opToggleRegistered} op).`);
+        log("Layer 1: Try /rbd:help or /rbd:save in chat (with autocomplete).");
       } catch (e) {
-        warn("CustomCommandRegistry setup failed:", e);
+        warn("Layer 1 CustomCommandRegistry setup failed:", e);
       }
     });
   } else {
-    warn("Layer 1 (CustomCommandRegistry): not available - need Bedrock 1.21.80+. Falling back to chat handlers.");
+    warn("Layer 1 (CustomCommandRegistry): system.beforeEvents.startup is undefined. Need Bedrock 1.21.80+. Falling back to chat handlers.");
   }
 } catch (e) {
   warn("Layer 1 init failed:", e);
-}
-
-// Handle custom command triggers
-try {
-  if (system.afterEvents && typeof system.afterEvents.customCommand !== "undefined") {
-    system.afterEvents.customCommand.subscribe((event) => {
-      try {
-        const cmdName = event.commandName || "";
-        if (!cmdName.startsWith("rbd:")) return;
-        const sub = cmdName.substring(4); // strip "rbd:"
-        // Handle named_list / named_delete as "named" with action
-        let parts = [sub];
-        if (sub === "named_list") parts = ["named", "list"];
-        if (sub === "named_delete") parts = ["named", "delete", event.relatives?.name || ""];
-
-        const player = event.source;
-        if (!player) return;
-        system.run(() => {
-          try { handleCommand(player, parts[0], parts); }
-          catch (e) { warn("Custom command handler error:", e); }
-        });
-      } catch (e) {
-        warn("customCommand event handler failed:", e);
-      }
-    });
-  }
-} catch (e) {
-  warn("customCommand event subscription failed:", e);
 }
 
 // ============================ v1.2.1 LAYER 2: chatSend (fallback for older Bedrock) ============================
@@ -1059,7 +1123,7 @@ function handleCommand(player, sub, parts) {
       break;
     }
     case "status": {
-      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.1 Status ===");
+      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.2 Status ===");
       announce(player, `\u00a7aEnabled: \u00a77${CONFIG.enabled}`);
       announce(player, `\u00a7aSave interval (sec): \u00a77${CONFIG.saveIntervalSeconds}`);
       announce(player, `\u00a7aCooldown (sec): \u00a77${CONFIG.cooldownSeconds}`);
@@ -1198,7 +1262,7 @@ function handleCommand(player, sub, parts) {
       break;
     }
     case "debug": {
-      announce(player, "\u00a7d\u00a7l=== RBD v1.2.1 Command Layers ===");
+      announce(player, "\u00a7d\u00a7l=== RBD v1.2.2 Command Layers ===");
       announce(player, `\u00a7aLayer 1 - CustomCommandRegistry (/rbd:*): \u00a77${LAYERS.customCommand ? "\u00a7aACTIVE" : "\u00a7cINACTIVE (need Bedrock 1.21.80+)"}`);
       announce(player, `\u00a7aLayer 2 - chatSend (!rbd chat): \u00a77${LAYERS.chatSend ? "\u00a7aACTIVE" : "\u00a7cINACTIVE (may need Beta APIs toggle)"}`);
       announce(player, `\u00a7aLayer 3 - RBD Notebook item UI: \u00a77${LAYERS.itemUI ? "\u00a7aACTIVE" : "\u00a7cINACTIVE"}`);
@@ -1208,7 +1272,7 @@ function handleCommand(player, sub, parts) {
     }
     case "help":
     default: {
-      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.1 Help ===");
+      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.2 Help ===");
       announce(player, "\u00a76Three ways to run commands:");
       announce(player, "\u00a7a  1. Slash commands: \u00a77/rbd:save, /rbd:info, etc. (Bedrock 1.21.80+)");
       announce(player, "\u00a7a  2. Chat commands: \u00a77!rbd save, !rbd info, etc. (older Bedrock)");
@@ -1302,7 +1366,7 @@ function pad(n) { return n < 10 ? "0" + n : String(n); }
 
 // ============================ Init Log ============================
 
-log("Return By Death v1.2.1 (Bedrock Edition) loaded.");
+log("Return By Death v1.2.2 (Bedrock Edition) loaded.");
 log(`Save interval: ${CONFIG.saveIntervalSeconds}s. Inspired by Subaru Natsuki from Re:Zero.`);
 log("Sound is in resource_pack_RBD (NOT behavior pack).");
 log("Command layers - Layer 1 (CustomCommandRegistry): " + (LAYERS.customCommand ? "ACTIVE" : "inactive"));

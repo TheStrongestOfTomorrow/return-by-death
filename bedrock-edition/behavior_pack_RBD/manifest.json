@@ -2,22 +2,22 @@
   "format_version": 2,
   "header": {
     "name": "Return By Death - Behavior Pack",
-    "description": "Re:Zero-inspired Return By Death mechanic for Bedrock Edition (including Pocket Edition). v1.2.1 PATCH: Fixed Bedrock chat commands - now works via 3 layers (CustomCommandRegistry for 1.21.80+, chatSend fallback, RBD Notebook item UI menu). Added Tier 1 RBD flavor: witch scent particles, Subaru death quotes, heartbeat at low HP, witch watching message every 5th death.",
+    "description": "Re:Zero-inspired Return By Death mechanic for Bedrock Edition (including Pocket Edition). v1.2.2 HOTFIX: Fixed Layer 1 CustomCommandRegistry - now uses the proper registerCommand callback (was using non-existent afterEvents.customCommand). /rbd:save slash commands now actually work on Bedrock 1.21.80+.",
     "uuid": "f1a2c3d4-5b6e-4f7a-8b9c-0d1e2f3a4b5c",
-    "version": [1, 2, 1],
+    "version": [1, 2, 2],
     "min_engine_version": [1, 21, 0]
   },
   "modules": [
     {
       "type": "data",
       "uuid": "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
-      "version": [1, 2, 1]
+      "version": [1, 2, 2]
     },
     {
       "type": "script",
       "language": "javascript",
       "uuid": "b2c3d4e5-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
-      "version": [1, 2, 1],
+      "version": [1, 2, 2],
       "entry": "scripts/main.js"
     }
   ],
@@ -32,7 +32,7 @@
     },
     {
       "uuid": "c3d4e5f6-7a8b-4c9d-0e1f-2a3b4c5d6e7f",
-      "version": [1, 2, 1]
+      "version": [1, 2, 2]
     }
   ],
   "metadata": {

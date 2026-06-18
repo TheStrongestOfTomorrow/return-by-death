@@ -7,7 +7,57 @@ A Minecraft mod inspired by **Subaru Natsuki's "Return By Death"** ability from 
 
 **Available for both Minecraft Java Edition (Fabric) and Minecraft Bedrock Edition (incl. Pocket Edition).**
 
-**Current version: v1.2.1** — see [What's New](#whats-new-in-v121) below.
+**Current version: v1.2.2** — see [What's New](#whats-new-in-v122) below.
+
+---
+
+## What's New in v1.2.2 (HOTFIX)
+
+**Fixes a critical bug in v1.2.1**: Layer 1 (`CustomCommandRegistry`) was completely broken — it registered commands but used a non-existent `system.afterEvents.customCommand` event to handle execution, so all `/rbd:*` slash commands returned "Unknown command". This is fixed in v1.2.2.
+
+### What was wrong
+
+In v1.2.1, the code did this:
+```js
+// BROKEN: registers the command but never handles execution
+registry.registerCommand({ name: "rbd:help", ... });
+// Then tried to listen to a non-existent event:
+system.afterEvents.customCommand.subscribe(...)  // ← does not exist!
+```
+
+### What's fixed in v1.2.2
+
+```js
+// CORRECT: pass the execution callback as the 2nd argument to registerCommand
+registry.registerCommand({
+  name: "rbd:help",
+  description: "...",
+  permissionLevel: CommandPermissionLevel.Any,  // proper enum, not raw 0
+  cheatsRequired: false,  // works without cheats enabled
+}, (origin) => {
+  // Handle the command execution here
+  const player = origin.sourceEntity;
+  system.run(() => handleCommand(player, "help", ["help"]));
+  return { status: CustomCommandStatus.Success };
+});
+```
+
+Also new in v1.2.2:
+- `cheatsRequired: false` on all commands — they work without enabling cheats
+- `CommandPermissionLevel.Any` enum (instead of raw `0`) for player commands
+- `CommandPermissionLevel.GameDirectors` enum for op commands
+- Proper `mandatoryParameters` for commands that take arguments (`/rbd:named <name>`, `/rbd:interval <sec>`, etc.) — autocomplete now shows the parameter name
+- Static import of `CommandPermissionLevel`, `CustomCommandParamType`, `CustomCommandStatus` from `@minecraft/server`
+
+### How to test the fix
+
+1. Install v1.2.2 packs (download from [the v1.2.2 release](../../releases/tag/v1.2.2))
+2. **Save & quit the world** (custom commands only register on world load)
+3. Re-enter the world
+4. Type `/rbd` in chat — you should see autocomplete suggestions like `/rbd:help`, `/rbd:save`, `/rbd:info`, etc.
+5. Run `/rbd:help` — it should now actually work
+
+If Layer 1 still doesn't work, run `!rbd debug` (Layer 2) or right-click the RBD Notebook (Layer 3) — these still work and will tell you which layers are active.
 
 ---
 
@@ -452,13 +502,14 @@ return-by-death/
 
 | Edition | Mod version | MC version         | Status      |
 |---------|-------------|--------------------|-------------|
-| Java    | v1.0.0 / v1.1.0 / v1.2.0 / v1.2.1 | 1.20.1 (Fabric)    | ✅ Supported |
-| Java    | v1.2.1      | 1.21.x / 26.x      | 🚧 Planned  |
+| Java    | v1.0.0 / v1.1.0 / v1.2.0 / v1.2.1 / v1.2.2 | 1.20.1 (Fabric)    | ✅ Supported |
+| Java    | v1.2.2      | 1.21.x / 26.x      | 🚧 Planned  |
 | Bedrock | v1.0.0      | 1.21+              | ✅ Supported |
 | Bedrock | v1.1.0      | 1.21+ (incl. 1.26.x) | ✅ Supported |
 | Bedrock | v1.2.0      | 1.21+ (incl. 1.26.x) | ✅ Supported |
-| Bedrock | v1.2.1      | 1.21+ (incl. 1.26.x) | ✅ Supported (recommended) |
-| Bedrock | v1.2.1      | Pocket Edition     | ✅ Supported |
+| Bedrock | v1.2.1      | 1.21+ (incl. 1.26.x) | ⚠️ Layer 1 broken — use v1.2.2 |
+| Bedrock | v1.2.2      | 1.21+ (incl. 1.26.x) | ✅ Supported (recommended) |
+| Bedrock | v1.2.2      | Pocket Edition     | ✅ Supported |
 
 The mod is server-authoritative — it works on dedicated servers, realms (Java), and shared worlds. Bedrock requires the world to have BOTH the behavior AND resource packs active.
 
@@ -482,7 +533,8 @@ The mod is server-authoritative — it works on dedicated servers, realms (Java)
 | v1.0.0  | 2026-06-18 | Initial release: core rewind mechanic + sound        |
 | v1.1.0  | 2026-06-18 | Major feature update: configurable interval, death counter, death log, particle beacon, named saves, configurable sound/broadcast, action bar cooldown, reset command |
 | v1.2.0  | 2026-06-18 | Default interval 20s, Bedrock saves potion effects + fire ticks, death title overlay, save indicator, `/rbd revert` + `/rbd lastdeath` + `/rbd testsound`, better cause reporting |
-| v1.2.1  | 2026-06-18 | **PATCH**: Bedrock command fix (3 layers: CustomCommandRegistry + chatSend + RBD Notebook UI). New `/rbd debug` command. Tier 1 RBD flavor: witch scent particles, Subaru death quotes, heartbeat at low HP, "Witch watching" message every 5th death. |
+| v1.2.1  | 2026-06-18 | Bedrock command fix (3 layers). New `/rbd debug` command. Tier 1 RBD flavor: witch scent, death quotes, heartbeat at low HP, "Witch watching" message. **⚠️ Layer 1 (CustomCommandRegistry) was broken — use v1.2.2 instead.** |
+| v1.2.2  | 2026-06-18 | **HOTFIX**: Fixed Layer 1 CustomCommandRegistry — slash commands `/rbd:save` etc. now actually work on Bedrock 1.21.80+. Added `cheatsRequired: false`, proper `CommandPermissionLevel` enums, mandatoryParameters for autocomplete. |
 
 Old releases are never deleted — find them all at [the Releases page](../../releases).
 

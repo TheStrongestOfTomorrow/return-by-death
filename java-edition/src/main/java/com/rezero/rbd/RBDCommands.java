@@ -138,7 +138,7 @@ public final class RBDCommands {
 
     private static int status(CommandContext<ServerCommandSource> ctx) {
         var server = ctx.getSource().getServer();
-        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== Return By Death v1.1.0 Status ==="), false);
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== Return By Death v1.2.2 Status ==="), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7aEnabled: \u00a77" + RBDGameRules.enabled(server)), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7aSave interval (sec): \u00a77" + RBDGameRules.saveIntervalSeconds(server)), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7aCooldown (sec): \u00a77" + RBDGameRules.cooldownSeconds(server)), false);
@@ -318,7 +318,7 @@ public final class RBDCommands {
     }
 
     private static int help(CommandContext<ServerCommandSource> ctx) {
-        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== Return By Death v1.2.0 Help ==="), false);
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== Return By Death v1.2.2 Help ==="), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a76Player commands:"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd save \u00a77- Manually create a save point now"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd info \u00a77- Show your current save point details"), false);
