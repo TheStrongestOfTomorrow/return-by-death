@@ -43,7 +43,7 @@ public final class RBDGameRules {
         ENABLED = GameRuleRegistry.register("rbdEnabled",
                 GameRules.Category.PLAYER, GameRuleFactory.createBooleanRule(true));
         SAVE_INTERVAL_SECONDS = GameRuleRegistry.register("rbdSaveIntervalSeconds",
-                GameRules.Category.PLAYER, GameRuleFactory.createIntRule(5, 1, 600));
+                GameRules.Category.PLAYER, GameRuleFactory.createIntRule(20, 1, 600));
         COOLDOWN_SECONDS = GameRuleRegistry.register("rbdCooldownSeconds",
                 GameRules.Category.PLAYER, GameRuleFactory.createIntRule(0, 0, 3600));
         BROADCAST_DEATH = GameRuleRegistry.register("rbdBroadcastDeath",

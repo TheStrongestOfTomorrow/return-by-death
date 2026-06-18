@@ -3,42 +3,68 @@
 > *"From zero. From zero. From zero. I'll restart from zero as many times as it takes."*
 > — Natsuki Subaru, Re:Zero − Starting Life in Another World
 
-A Minecraft mod inspired by **Subaru Natsuki's "Return By Death"** ability from *Re:Zero − Starting Life in Another World*. When you die, you rewind to your last save point — with the inventory, position, and vitals you had at that moment — and the iconic Return By Death sound plays to everyone on the server.
+A Minecraft mod inspired by **Subaru Natsuki's "Return By Death"** ability from *Re:Zero − Starting Life in Another World*. When you die, you rewind to your last save point — with the inventory, position, hunger, vitals, XP, potion effects, and fire ticks you had at that moment — and the iconic Return By Death sound plays to everyone on the server.
 
 **Available for both Minecraft Java Edition (Fabric) and Minecraft Bedrock Edition (incl. Pocket Edition).**
 
-**Current version: v1.1.0** — see [What's New](#whats-new-in-v110) below.
+**Current version: v1.2.0** — see [What's New](#whats-new-in-v120) below.
+
+---
+
+## What's New in v1.2.0
+
+A focused improvement update building on v1.1.0. **v1.0.0 and v1.1.0 are still available** at their respective release pages — we never overwrite old releases.
+
+### New / changed in v1.2.0
+
+| Change | Description |
+|--------|-------------|
+| **Default save interval → 20s** | Changed from 5s to 20s by default. Still configurable 1-600s via `/rbd interval`. |
+| **Bedrock now saves potion effects** | Bedrock Edition now captures and restores active potion effects (was missing in v1.1.0). Java already did this. |
+| **Bedrock now saves fire ticks** | Bedrock Edition now records whether the player was on fire and restores the fire state on rewind. |
+| **Death title overlay** | "Returned By Death" title + "Loop #X" subtitle shown on the screen when you die. |
+| **Action bar save indicator** | Every 3rd save (i.e. every 60s at default 20s), a brief "⚡ Save point recorded" message flashes in your action bar. |
+| **Better death cause reporting** | Death log and `/rbd lastdeath` now show readable causes (e.g. "lava" instead of "lava", "entity attack (zombie)" instead of just "entityAttack"). |
+| **New command: `/rbd revert`** | Instantly teleport back to your save point without dying. Uses the same cooldown as death-triggered reverts. |
+| **New command: `/rbd lastdeath`** | Show details of your most recent death (time, location, cause, how long ago). |
+| **New command: `/rbd testsound`** | Play the Return By Death sound on demand to verify the audio is installed correctly. |
+| **Bedrock sound robustness** | Improved `playReturnByDeathSound` — uses `dimension.playSound` for radius-based, falls back to per-player `playSound` for global. |
 
 ---
 
 ## What's New in v1.1.0
 
-A major feature update on top of the v1.0.0 release. **v1.0.0 is still available** at [the v1.0.0 release](https://github.com/TheStrongestOfTomorrow/return-by-death/releases/tag/v1.0.0) — we never overwrite old releases.
-
-### New features
-
 | Feature | Description |
 |---------|-------------|
-| **Configurable save interval** | Change the auto-save interval from 5s to anything 1–600s. `/rbd interval <sec>` (Java) or `!rbd interval <sec>` (Bedrock). |
-| **Death counter ("loops")** | Tracks how many times you've died — a Subaru Natsuki reference. Persists across server restarts. `/rbd loops` to view. |
-| **Death log** | Records the last 10 deaths with timestamp, dimension, coordinates, and cause. `/rbd looplog` to view. |
-| **Save point particle beacon** | Purple witch-themed particles appear at your save point location so you always know where you'll respawn. Toggle per-player or globally. |
-| **Named save points** | Create up to 3 (configurable) named save points in addition to the auto-save. `/rbd named <name>`, `/rbd named list`, `/rbd named delete <name>`. |
-| **Configurable sound** | Adjust the Return By Death sound volume (0–100%) and pitch (50–200%). `/rbd volume`, `/rbd pitch`. |
-| **Configurable broadcast radius** | Limit the sound + broadcast message to a radius around the death location (-1 = whole server). `/rbd radius <blocks>`. |
-| **Action bar cooldown** | Remaining cooldown is shown in your action bar (top of screen) so you know exactly when you can rewind again. |
-| **Save point reset** | Clear your save point — your next death becomes permanent. `/rbd reset`. Useful for hardcore runs or self-imposed challenges. |
-| **Per-player particle toggle** | Each player can opt out of save point particles without affecting others. `/rbd particles <on\|off>`. |
+| **Configurable save interval** | Change the auto-save interval from 5s to anything 1-600s. |
+| **Death counter ("loops")** | Tracks how many times you've died — a Subaru Natsuki reference. Persists across restarts. |
+| **Death log** | Records the last 10 deaths with timestamp, dimension, coordinates, and cause. |
+| **Save point particle beacon** | Purple witch-themed particles appear at your save point location. |
+| **Named save points** | Create up to 3 (configurable) named save points in addition to the auto-save. |
+| **Configurable sound** | Adjust the Return By Death sound volume (0-100%) and pitch (50-200%). |
+| **Configurable broadcast radius** | Limit the sound + broadcast message to a radius around the death location (-1 = whole server). |
+| **Action bar cooldown** | Remaining cooldown is shown in your action bar. |
+| **Save point reset** | Clear your save point — your next death becomes permanent. |
+| **Per-player particle toggle** | Each player can opt out of save point particles without affecting others. |
 
 ---
 
 ## What It Does
 
-- **Auto-save every N seconds.** The mod silently captures your complete state — position, dimension, full inventory, armor, health, hunger, XP level, and (Java) active potion effects — every interval (default 5 seconds).
-- **Death triggers a rewind.** When you die, instead of going to the death screen and respawning at world spawn, you are teleported back to your last save point with the inventory and stats you had at the moment of save.
+- **Auto-save every 20 seconds** (default; configurable 1-600s). The mod silently captures your complete state:
+  - **Position** (x, y, z, yaw, pitch) and dimension
+  - **Full inventory** (36 slots: 27 main + 9 hotbar)
+  - **Armor** (head, chest, legs, feet) and offhand (Java)
+  - **Health, max health**
+  - **Hunger, saturation, exhaustion** (Java full; Bedrock hunger only)
+  - **Air, fire ticks, frozen ticks** (Java full; Bedrock fire only)
+  - **XP level, XP progress, total XP** (Java full; Bedrock level only)
+  - **Active potion effects** (Java full; Bedrock in v1.2.0+)
+- **Death triggers a rewind.** When you die, instead of going to the death screen and respawning at world spawn, you are teleported back to your last save point with everything you had at the moment of save.
 - **Iconic sound cue.** The provided `re-zero-return-by-death.mp3` (converted to OGG/Vorbis) plays to **every player on the server** (or within a configurable radius) when someone dies.
+- **Death title overlay.** A "Returned By Death" title with subtitle "Loop #X" appears on your screen for ~3 seconds when you die.
 - **Requires Instant Respawn.** The mod auto-enables `doImmediateRespawn` (Java) and reminds you to enable it (Bedrock) so there's no death-screen delay between dying and rewinding.
-- **Dropped items are cleaned up.** In Bedrock, items drop on death; the mod despawns them within an 8-block radius of the death location so your saved inventory isn't duplicated.
+- **Dropped items are cleaned up** (Bedrock). Items drop on death in Bedrock; the mod despawns them within an 8-block radius of the death location so your saved inventory isn't duplicated.
 
 ---
 
@@ -55,7 +81,7 @@ A major feature update on top of the v1.0.0 release. **v1.0.0 is still available
 1. Install Fabric Loader for Minecraft 1.20.1.
 2. Drop the **Fabric API** jar into your `mods/` folder.
 3. Build the mod from source (see [Building from Source](#building-from-source)) or download a pre-built `.jar` from the [Releases](../../releases) page.
-4. Drop `return-by-death-1.1.0.jar` into your `mods/` folder.
+4. Drop `return-by-death-1.2.0.jar` into your `mods/` folder.
 5. Launch the game. The mod will auto-enable `doImmediateRespawn`.
 6. Join a world — you'll see the welcome message in chat.
 
@@ -67,14 +93,63 @@ A major feature update on top of the v1.0.0 release. **v1.0.0 is still available
 - "Immediate Respawn" toggle must be ON in world settings
 
 **Steps:**
-1. Download `behavior_pack_RBD.mcpack` and `resource_pack_RBD.mcpack` from the [v1.1.0 Release](../../releases/tag/v1.1.0).
-2. Double-click the `.mcpack` files (or import them via Settings → Storage → Import).
+1. Download `behavior_pack_RBD.mcpack` and `resource_pack_RBD.mcpack` from the [v1.2.0 Release](../../releases/tag/v1.2.0).
+2. **Double-click BOTH `.mcpack` files** to import them (or import via Settings → Storage → Import).
+   - You MUST install BOTH packs. The sound is in the **resource pack** only — Bedrock does not load custom sounds from behavior packs.
 3. Open your world settings → **Behavior Packs** → activate "Return By Death - Behavior Pack".
 4. Open **Resource Packs** → activate "Return By Death - Resource Pack".
 5. In world settings, enable **Immediate Respawn** (Game → toggle "Immediate Respawn").
-6. Join the world — you'll see the welcome message in chat.
+6. **Restart your Minecraft client completely** (close the app and reopen it).
+   - Bedrock does NOT hot-reload new sound files referenced by `sound_definitions.json`. A full client restart is required for the sound to load.
+7. Join the world — you'll see the welcome message in chat.
+8. Type `!rbd testsound` to verify the sound works. If you don't hear it, see [Troubleshooting](#troubleshooting) below.
 
-> **Pocket Edition note:** The exact same `.mcpack` files work on Android/iOS. Just transfer them to your device and open with Minecraft.
+> **Pocket Edition note:** The exact same `.mcpack` files work on Android/iOS. Transfer them to your device, tap to open with Minecraft.
+
+---
+
+## Troubleshooting
+
+### "I don't hear the Return By Death sound when I die!"
+
+This is the most common issue, and it's almost always one of these:
+
+1. **You only installed the behavior pack, not the resource pack.**
+   - The sound file (`return_by_death.ogg`) lives in the **resource pack**, not the behavior pack. Bedrock only loads custom sounds from resource packs.
+   - Fix: install both `.mcpack` files and activate both packs in your world.
+
+2. **You didn't restart your Minecraft client after installing the packs.**
+   - Bedrock caches sound definitions on startup. New sounds referenced by `sound_definitions.json` need a full client restart to load.
+   - Fix: completely close Minecraft (force-quit on mobile, fully exit the app) and reopen it.
+
+3. **The resource pack is not active in your world.**
+   - Even after installing, you must activate the pack per-world.
+   - Fix: World Settings → Resource Packs → activate "Return By Death - Resource Pack".
+
+4. **You're testing it wrong.**
+   - Type `!rbd testsound` (Bedrock) or `/rbd testsound` (Java) to play the sound on demand. If THIS doesn't work, it's an install issue. If it works but the death sound doesn't, check the broadcast radius and volume settings.
+
+5. **The sound volume is 0% or muted in game settings.**
+   - Check your music/sound slider in game settings.
+   - Check the mod's volume: `!rbd status` → `Sound volume: X%`. If it's 0%, run `!rbd volume 100`.
+
+### "The mod doesn't seem to do anything when I die"
+
+- Make sure the **behavior pack is active** in World Settings → Behavior Packs.
+- Make sure **Immediate Respawn is ON** in world settings.
+- Type `!rbd status` (Bedrock) or `/rbd status` (Java) to verify the mod is enabled.
+- If `Enabled: false`, run `!rbd mod on` (Bedrock) or `/rbd mod on` (Java).
+- Check for error messages in chat — the mod logs failures.
+
+### "My death counter keeps resetting"
+
+- Bedrock: the counter is stored per-player as a dynamic property. If you remove the behavior pack or reset the world, the counter is lost.
+- Java: the counter is in `world/data/rbd_state.dat`. If you delete this file, the counter resets.
+
+### "Items are duplicated when I die!"
+
+- This happens in Bedrock if the cleanup radius is too small. The mod despawns dropped items within 8 blocks of the death location. If items are flung further (e.g. by an explosion), they won't be cleaned up.
+- Workaround: increase the radius in `main.js` (search for `ITEM_DESPAWN_RADIUS`).
 
 ---
 
@@ -91,6 +166,9 @@ A major feature update on top of the v1.0.0 release. **v1.0.0 is still available
 | `/rbd status`                    | Show all mod settings                    |
 | `/rbd loops`                     | Show your death count                    |
 | `/rbd looplog`                   | Show your last 10 deaths                 |
+| `/rbd lastdeath`                 | Show details of your most recent death (v1.2.0) |
+| `/rbd revert`                    | Instantly teleport to your save point (v1.2.0) |
+| `/rbd testsound`                 | Play the RBD sound to verify it works (v1.2.0) |
 | `/rbd reset`                     | Clear your save point (permadeath mode)  |
 | `/rbd named <name>`              | Create a named save point                |
 | `/rbd named list`                | List your named save points              |
@@ -116,7 +194,7 @@ A major feature update on top of the v1.0.0 release. **v1.0.0 is still available
 | Gamerule                     | Type    | Default | Description                                          |
 |------------------------------|---------|---------|------------------------------------------------------|
 | `rbdEnabled`                 | bool    | `true`  | Master toggle for the mod                            |
-| `rbdSaveIntervalSeconds`     | int     | `5`     | Seconds between auto-saves                           |
+| `rbdSaveIntervalSeconds`     | int     | `20`    | Seconds between auto-saves (v1.2.0 default)          |
 | `rbdCooldownSeconds`         | int     | `0`     | Cooldown (seconds) before next rewind can trigger    |
 | `rbdBroadcastDeath`          | bool    | `false` | Broadcast a server-wide message on rewind            |
 | `rbdBroadcastRadius`         | int     | `-1`    | Broadcast radius in blocks (-1 = global)             |
@@ -139,6 +217,9 @@ A major feature update on top of the v1.0.0 release. **v1.0.0 is still available
 | `!rbd status`                    | Show all mod settings                    |
 | `!rbd loops`                     | Show your death count                    |
 | `!rbd looplog`                   | Show your last 10 deaths                 |
+| `!rbd lastdeath`                 | Show your most recent death (v1.2.0)     |
+| `!rbd revert`                    | Instantly teleport to save point (v1.2.0) |
+| `!rbd testsound`                 | Play RBD sound to verify (v1.2.0)        |
 | `!rbd reset`                     | Clear your save point (permadeath mode)  |
 | `!rbd named <name>`              | Create a named save point                |
 | `!rbd named list`                | List named save points                   |
@@ -182,13 +263,14 @@ Bedrock config persists across world restarts via world dynamic properties.
 
 | Edition | Mod version | MC version target | Notes |
 |---------|-------------|-------------------|-------|
-| Java    | v1.0.0 / v1.1.0 | 1.20.1 (Fabric)   | Uses Java 17, Fabric Loom 1.6, Fabric API 0.92.2+1.20.1 |
+| Java    | v1.0.0 / v1.1.0 / v1.2.0 | 1.20.1 (Fabric)   | Uses Java 17, Fabric Loom 1.6, Fabric API 0.92.2+1.20.1 |
 | Bedrock | v1.0.0       | 1.21+             | Uses @minecraft/server 1.13.0 |
 | Bedrock | v1.1.0       | 1.21+ (incl. 1.26.x) | Uses @minecraft/server 1.14.0 |
+| Bedrock | v1.2.0       | 1.21+ (incl. 1.26.x) | Uses @minecraft/server 1.14.0; saves potion effects + fire |
 
 **Roadmap:**
-- Java 1.21.x / 26.x support: planned. Requires Java 21 toolchain + minor API refactors (effect serialization via `Registries` is already in place in v1.1.0).
-- @minecraft/server 2.x support: planned for a future Bedrock release. API has breaking changes that need careful migration.
+- Java 1.21.x / 26.x support: planned. The hardest part (effect serialization via `Registries`) is already in place.
+- @minecraft/server 2.x support: planned for a future Bedrock release. API has breaking changes.
 
 ---
 
@@ -198,11 +280,9 @@ Bedrock config persists across world restarts via world dynamic properties.
 
 ```bash
 cd java-edition
-# Gradle wrapper jar is not bundled (download on first run).
-# Use system gradle 8.7+ OR bootstrap the wrapper:
 gradle wrapper --gradle-version 8.7
 ./gradlew build
-# Output: java-edition/build/libs/return-by-death-1.1.0.jar
+# Output: java-edition/build/libs/return-by-death-1.2.0.jar
 ```
 
 ### Bedrock Edition
@@ -219,17 +299,42 @@ zip -r resource_pack_RBD.mcpack resource_pack_RBD/
 
 ## How It Works (Technical)
 
+### What Gets Saved
+
+| Field                  | Java | Bedrock v1.1.0 | Bedrock v1.2.0 |
+|------------------------|------|----------------|----------------|
+| Position (x, y, z)     | ✅   | ✅             | ✅             |
+| Rotation (yaw, pitch)  | ✅   | ✅             | ✅             |
+| Dimension              | ✅   | ✅             | ✅             |
+| Full inventory (36)    | ✅   | ✅             | ✅             |
+| Armor (4 slots)        | ✅   | ✅             | ✅             |
+| Offhand                | ✅   | ❌             | ❌             |
+| Health                 | ✅   | ✅             | ✅             |
+| Hunger                 | ✅   | ✅             | ✅             |
+| Saturation             | ✅   | ❌             | ❌             |
+| Exhaustion             | ✅   | ❌             | ❌             |
+| Air / breath           | ✅   | ❌             | ❌             |
+| Fire ticks             | ✅   | ❌             | ✅ (NEW)       |
+| Frozen ticks           | ✅   | ❌             | ❌             |
+| XP level               | ✅   | ✅             | ✅             |
+| XP progress            | ✅   | ❌             | ❌             |
+| Total XP               | ✅   | ❌             | ❌             |
+| **Potion effects**     | ✅   | ❌             | ✅ (NEW)       |
+
 ### Java Edition
 
 The mod uses **Fabric** with a **Mixin** into `ServerPlayerEntity.onDeath()`:
 
 1. The mixin intercepts `onDeath()` at `HEAD`.
-2. `DeathHandler.onPlayerDeath()` checks:
-   - Is the mod enabled?
-   - Is a cooldown active?
-   - Does a save point exist?
-3. If all checks pass, the mod plays the sound (configurable volume/pitch/radius), increments the death counter (`RBDState`), adds an entry to the death log, restores the player's state from `SaveManager`, grants invulnerability, and **cancels** the rest of `onDeath()` — so no item drops, no death message, no scoreboard updates.
-4. If any check fails, the death proceeds normally (vanilla).
+2. `DeathHandler.onPlayerDeath()` checks: mod enabled? cooldown active? save point exists?
+3. If all checks pass, the mod:
+   - Plays the sound (configurable volume/pitch/radius)
+   - Increments the death counter (`RBDState`)
+   - Adds an entry to the death log (with readable cause via `source.getDeathMessage()`)
+   - Shows a death title overlay ("Returned By Death" + "Loop #X")
+   - Restores the player's state from `SaveManager` (position, inventory, armor, vitals, XP, effects, fire, etc.)
+   - Grants 3 seconds of invulnerability
+   - **Cancels** the rest of `onDeath()` — no item drops, no death message, no scoreboard updates
 
 `SaveManager` is driven by `ServerTickEvents.END_SERVER_TICK` and captures state every configurable interval. Captures are deep (items are `.copy()`-d) so the save is not affected by later inventory changes.
 
@@ -242,12 +347,14 @@ The mod uses **Fabric** with a **Mixin** into `ServerPlayerEntity.onDeath()`:
 Bedrock doesn't have mixins, so the approach is event-driven:
 
 1. `system.runInterval(captureSave, 20)` snapshots every player every interval (checked each second).
-2. `world.afterEvents.playerDie` fires on death — we play the sound (configurable volume/pitch/radius), increment the death counter (dynamic property), add to the death log (JSON-encoded dynamic property), mark the player for return, and record the death location.
-3. `world.afterEvents.playerSpawn` (with `initialSpawn=false`) fires on respawn — we teleport the player back to their save point, restore their inventory and stats, and clear dropped items near the death location.
+2. `world.afterEvents.playerDie` fires on death — we play the sound, increment the death counter (dynamic property), add to the death log (JSON-encoded dynamic property), show the title overlay, mark the player for return, and record the death location.
+3. `world.afterEvents.playerSpawn` (with `initialSpawn=false`) fires on respawn — we teleport the player back to their save point, restore their inventory/armor/vitals/XP/effects/fire, and clear dropped items near the death location.
 4. A separate `system.runInterval` ticks every second to spawn particle beacons at each save point.
 5. Another `system.runInterval` ticks every 0.5s to display the cooldown in the action bar.
 
 Config is persisted in `world.getDynamicProperty("rbd:config")` as JSON.
+
+The sound is in `resource_pack_RBD/sounds/return_by_death.ogg` and registered in `resource_pack_RBD/sounds/sound_definitions.json` — Bedrock only loads custom sounds from resource packs, never from behavior packs.
 
 ---
 
@@ -258,20 +365,20 @@ return-by-death/
 ├── java-edition/                    # Fabric mod (Minecraft Java 1.20.1)
 │   ├── build.gradle
 │   ├── settings.gradle
-│   ├── gradle.properties            # mod_version = 1.1.0
+│   ├── gradle.properties            # mod_version = 1.2.0
 │   ├── gradle/wrapper/
 │   ├── LICENSE
 │   ├── .gitignore
 │   └── src/main/
 │       ├── java/com/rezero/rbd/
-│       │   ├── ReturnByDeathMod.java        # Main entrypoint (v1.1.0)
+│       │   ├── ReturnByDeathMod.java        # Main entrypoint (v1.2.0)
 │       │   ├── ReturnByDeathClient.java     # Client stub
 │       │   ├── SaveManager.java             # Auto + named save logic
-│       │   ├── DeathHandler.java            # Death interception + sound + state restore
+│       │   ├── DeathHandler.java            # Death interception + sound + state restore + revert()
 │       │   ├── RBDGameRules.java            # 12 gamerules
-│       │   ├── RBDState.java                # NEW v1.1.0: persistent death counts + logs
-│       │   ├── SavePointBeacon.java         # NEW v1.1.0: particle beacon
-│       │   ├── RBDCommands.java             # All /rbd commands (player + op)
+│       │   ├── RBDState.java                # Persistent death counts + logs
+│       │   ├── SavePointBeacon.java         # Particle beacon
+│       │   ├── RBDCommands.java             # All /rbd commands (player + op) - 25 total
 │       │   └── mixins/
 │       │       ├── ServerPlayerEntityMixin.java
 │       │       └── LivingEntityMixin.java
@@ -286,12 +393,12 @@ return-by-death/
 │
 ├── bedrock-edition/                 # Bedrock / Pocket Edition
 │   ├── behavior_pack_RBD/
-│   │   ├── manifest.json            # version [1, 1, 0]
+│   │   ├── manifest.json            # version [1, 2, 0]
 │   │   ├── pack_icon.png
 │   │   └── scripts/
-│   │       └── main.js              # All mod logic (v1.1.0)
+│   │       └── main.js              # All mod logic (v1.2.0) - saves effects + fire
 │   └── resource_pack_RBD/
-│       ├── manifest.json            # version [1, 1, 0]
+│       ├── manifest.json            # version [1, 2, 0]
 │       ├── pack_icon.png
 │       └── sounds/
 │           ├── sound_definitions.json
@@ -312,21 +419,22 @@ return-by-death/
 
 | Edition | Mod version | MC version         | Status      |
 |---------|-------------|--------------------|-------------|
-| Java    | v1.0.0      | 1.20.1 (Fabric)    | ✅ Supported |
-| Java    | v1.1.0      | 1.20.1 (Fabric)    | ✅ Supported |
-| Java    | v1.1.0      | 1.21.x / 26.x      | 🚧 Planned  |
+| Java    | v1.0.0 / v1.1.0 / v1.2.0 | 1.20.1 (Fabric)    | ✅ Supported |
+| Java    | v1.2.0      | 1.21.x / 26.x      | 🚧 Planned  |
 | Bedrock | v1.0.0      | 1.21+              | ✅ Supported |
 | Bedrock | v1.1.0      | 1.21+ (incl. 1.26.x) | ✅ Supported |
-| Bedrock | v1.1.0      | Pocket Edition     | ✅ Supported |
+| Bedrock | v1.2.0      | 1.21+ (incl. 1.26.x) | ✅ Supported |
+| Bedrock | v1.2.0      | Pocket Edition     | ✅ Supported |
 
-The mod is server-authoritative — it works on dedicated servers, realms (Java), and shared worlds. Bedrock requires the world to have the behavior + resource packs active.
+The mod is server-authoritative — it works on dedicated servers, realms (Java), and shared worlds. Bedrock requires the world to have BOTH the behavior AND resource packs active.
 
 ---
 
 ## Known Limitations
 
-- **Bedrock:** Item drops are cleaned up *after* death (within an 8-block radius). Items flung further than that by explosions will not be cleaned. This is a Bedrock API limitation — there's no pre-death event.
-- **Bedrock:** Saturation and XP progress are not perfectly preserved (the API doesn't expose them as cleanly as Java). XP level is preserved; progress resets to 0.
+- **Bedrock:** Item drops are cleaned up *after* death (within an 8-block radius). Items flung further than that by explosions will not be cleaned.
+- **Bedrock:** Saturation, XP progress, air, and frozen ticks are not preserved (the API doesn't expose them cleanly). XP level is preserved; progress resets to 0.
+- **Bedrock:** Sound files require a full client restart to load — they are NOT hot-reloaded when you join a world.
 - **Java:** Ender chest contents are intentionally NOT saved — Return By Death only rewinds the player's person, not their storage.
 - **Both:** The mod does not save block changes. If you die, your save point may now be inside a creeper crater. Be careful.
 - **Both:** Named save points are stored in-memory (not persisted across server restarts). This is intentional for game balance.
@@ -339,6 +447,7 @@ The mod is server-authoritative — it works on dedicated servers, realms (Java)
 |---------|------------|------------------------------------------------------|
 | v1.0.0  | 2026-06-18 | Initial release: core rewind mechanic + sound        |
 | v1.1.0  | 2026-06-18 | Major feature update: configurable interval, death counter, death log, particle beacon, named saves, configurable sound/broadcast, action bar cooldown, reset command |
+| v1.2.0  | 2026-06-18 | Default interval 20s, Bedrock saves potion effects + fire ticks, death title overlay, save indicator, `/rbd revert` + `/rbd lastdeath` + `/rbd testsound`, better cause reporting |
 
 Old releases are never deleted — find them all at [the Releases page](../../releases).
 

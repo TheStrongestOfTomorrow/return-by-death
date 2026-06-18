@@ -13,10 +13,12 @@
   "rbd.message.named_save_created": "Named save point '%s' created",
   "rbd.message.named_save_deleted": "Named save point '%s' deleted",
   "rbd.message.max_named_reached": "Maximum named save points reached (%s)",
+  "rbd.message.reverted": "Reverted to your save point",
+  "rbd.message.testsound": "Playing Return By Death sound. If you don't hear it, restart your client and reinstall both packs.",
   "death.attack.return_by_death": "%s was killed but Returned By Death",
 
   "gamerule.rbdEnabled": "Return By Death - Master toggle",
-  "gamerule.rbdSaveIntervalSeconds": "Return By Death - Save interval in seconds (1-600)",
+  "gamerule.rbdSaveIntervalSeconds": "Return By Death - Save interval in seconds (1-600, default 20)",
   "gamerule.rbdCooldownSeconds": "Return By Death - Cooldown seconds before next rewind",
   "gamerule.rbdBroadcastDeath": "Return By Death - Broadcast message when a player rewinds",
   "gamerule.rbdBroadcastRadius": "Return By Death - Broadcast radius in blocks (-1 = global)",

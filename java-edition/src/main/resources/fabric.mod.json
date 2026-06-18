@@ -3,7 +3,7 @@
   "id": "rbd",
   "version": "${version}",
   "name": "Return By Death",
-  "description": "A Re:Zero-inspired mod. When you die, you rewind to your last save point (recorded every 5 seconds, configurable) with the inventory you had at that moment. Plays the iconic Return By Death sound on death. Requires Instant Respawn.\n\nv1.1.0 adds: configurable save interval, death counter ('loops'), death log, particle beacon, named save points, configurable sound volume/pitch/broadcast radius, save-point reset, action bar cooldown display.\n\nInspired by Subaru Natsuki's ability from Re:Zero.",
+  "description": "A Re:Zero-inspired mod. When you die, you rewind to your last save point (recorded every 20 seconds, configurable) with the inventory, hunger, vitals, XP, and potion effects you had at that moment. Plays the iconic Return By Death sound on death. Requires Instant Respawn.\n\nv1.2.0: Default save interval changed to 20s. New commands: /rbd revert (instant teleport to save), /rbd lastdeath, /rbd testsound. Death subtitle \"Returned By Death - Loop #X\". Action bar save indicator. Better death cause reporting.\n\nv1.1.0: Configurable save interval, death counter ('loops'), death log, particle beacon, named save points, configurable sound volume/pitch/broadcast radius, action bar cooldown, save-point reset.\n\nInspired by Subaru Natsuki's ability from Re:Zero.",
   "authors": [
     "Return By Death Mod Team"
   ],

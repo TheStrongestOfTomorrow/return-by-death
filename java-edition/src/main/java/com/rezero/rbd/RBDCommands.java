@@ -62,7 +62,10 @@ public final class RBDCommands {
                             .then(literal("status").executes(RBDCommands::status))
                             .then(literal("loops").executes(RBDCommands::loops))
                             .then(literal("looplog").executes(RBDCommands::looplog))
+                            .then(literal("lastdeath").executes(RBDCommands::lastdeath))
                             .then(literal("reset").executes(RBDCommands::reset))
+                            .then(literal("revert").executes(RBDCommands::revert))
+                            .then(literal("testsound").executes(RBDCommands::testsound))
 
                             .then(literal("named")
                                     .then(argument("name", StringArgumentType.word()).executes(RBDCommands::namedCreate))
@@ -201,6 +204,64 @@ public final class RBDCommands {
         return 1;
     }
 
+    private static int revert(CommandContext<ServerCommandSource> ctx) {
+        ServerPlayerEntity player = ctx.getSource().getPlayer();
+        if (player == null) { ctx.getSource().sendFeedback(() -> Text.literal("\u00a7cOnly players can use this command."), false); return 0; }
+        // Use DeathHandler.revert for shared cooldown logic
+        String err = DeathHandler.revert(player);
+        if (err != null) {
+            final String e = err;
+            ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d[RBD] \u00a7c" + e), false);
+        } else {
+            var s = SaveManager.getSave(player.getUuid());
+            if (s != null) {
+                ctx.getSource().sendFeedback(() -> Text.literal(
+                        String.format("\u00a7d[RBD] \u00a7aReverted to save point at \u00a77%.1f, %.1f, %.1f\u00a7a in \u00a7b%s\u00a7a.",
+                                s.x, s.y, s.z, s.worldKey.getValue())), false);
+            }
+        }
+        return 1;
+    }
+
+    private static int lastdeath(CommandContext<ServerCommandSource> ctx) {
+        ServerPlayerEntity player = ctx.getSource().getPlayer();
+        if (player == null) { ctx.getSource().sendFeedback(() -> Text.literal("\u00a7cOnly players can use this command."), false); return 0; }
+        var server = ctx.getSource().getServer();
+        List<RBDState.DeathRecord> log = RBDState.get(server).getDeathLog(player.getUuid());
+        if (log.isEmpty()) {
+            ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d[RBD] \u00a77You have no recorded deaths."), false);
+        } else {
+            RBDState.DeathRecord r = log.get(0);
+            SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            final String time = fmt.format(new Date(r.time));
+            final String dim = r.dimension.replace("minecraft:", "");
+            ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l[RBD] Last death:"), false);
+            ctx.getSource().sendFeedback(() -> Text.literal(
+                    String.format("\u00a7a  Time: \u00a77%s", time)), false);
+            ctx.getSource().sendFeedback(() -> Text.literal(
+                    String.format("\u00a7a  Location: \u00a77%.1f, %.1f, %.1f \u00a7ain \u00a7b%s", r.x, r.y, r.z, dim)), false);
+            ctx.getSource().sendFeedback(() -> Text.literal(
+                    String.format("\u00a7a  Cause: \u00a7c%s", r.cause)), false);
+            long agoSec = (System.currentTimeMillis() - r.time) / 1000;
+            ctx.getSource().sendFeedback(() -> Text.literal(
+                    String.format("\u00a77  (%d second(s) ago)", agoSec)), false);
+        }
+        return 1;
+    }
+
+    private static int testsound(CommandContext<ServerCommandSource> ctx) {
+        ServerPlayerEntity player = ctx.getSource().getPlayer();
+        if (player == null) { ctx.getSource().sendFeedback(() -> Text.literal("\u00a7cOnly players can use this command."), false); return 0; }
+        var server = ctx.getSource().getServer();
+        float vol = RBDGameRules.soundVolume(server);
+        float pitch = RBDGameRules.soundPitch(server);
+        player.playSound(ReturnByDeathMod.RETURN_BY_DEATH_SOUND, net.minecraft.sound.SoundCategory.PLAYERS, vol, pitch);
+        ctx.getSource().sendFeedback(() -> Text.literal(
+                String.format("\u00a7d[RBD] \u00a7aPlaying Return By Death sound (vol=%d%%, pitch=%d%%). If you don't hear it, see the README troubleshooting section.",
+                        (int)(vol * 100), (int)(pitch * 100))), false);
+        return 1;
+    }
+
     private static int namedCreate(CommandContext<ServerCommandSource> ctx) {
         ServerPlayerEntity player = ctx.getSource().getPlayer();
         if (player == null) { ctx.getSource().sendFeedback(() -> Text.literal("\u00a7cOnly players can use this command."), false); return 0; }
@@ -257,13 +318,16 @@ public final class RBDCommands {
     }
 
     private static int help(CommandContext<ServerCommandSource> ctx) {
-        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== Return By Death v1.1.0 Help ==="), false);
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== Return By Death v1.2.0 Help ==="), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a76Player commands:"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd save \u00a77- Manually create a save point now"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd info \u00a77- Show your current save point details"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd status \u00a77- Show all mod settings"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd loops \u00a77- Show your death count"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd looplog \u00a77- Show your last 10 deaths"), false);
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd lastdeath \u00a77- Show details of your most recent death"), false);
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd revert \u00a77- Instantly teleport to your save point (no death)"), false);
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd testsound \u00a77- Play the Return By Death sound to verify it works"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd reset \u00a77- Clear your save point (permadeath mode)"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd named <name> \u00a77- Create a named save point"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd named list \u00a77- List your named save points"), false);

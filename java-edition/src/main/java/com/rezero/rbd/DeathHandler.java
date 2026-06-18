@@ -8,11 +8,17 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /**
  * DeathHandler - intercepts player death and rewinds them to their save point.
+ *
+ * v1.2.0 enhancements:
+ *   - Death title overlay ("Returned By Death") with subtitle ("Loop #X")
+ *   - Better death cause reporting (uses source.getDeathMessage for nice text)
+ *   - Added revert() method for the /rbd revert command
  *
  * v1.1.0 enhancements:
  *   - Configurable sound volume / pitch (gamerules)
@@ -58,8 +64,22 @@ public final class DeathHandler {
         }
 
         // === RETURN BY DEATH TRIGGERS ===
+        // Build a readable cause string for the death log
+        String causeStr;
+        try {
+            Text deathMsg = source.getDeathMessage(player);
+            causeStr = deathMsg != null ? deathMsg.getString() : source.getName();
+            // Strip the player name from the start of the message if present
+            String pName = player.getName().getString();
+            if (causeStr.startsWith(pName)) {
+                causeStr = causeStr.substring(pName.length()).trim();
+            }
+        } catch (Throwable t) {
+            causeStr = source.getName();
+        }
+
         ReturnByDeathMod.LOGGER.info("[Return By Death] {} died (cause: {}). Triggering rewind.",
-                player.getName().getString(), source.getName());
+                player.getName().getString(), causeStr);
 
         // 1. Play the iconic sound to all players (configurable volume / pitch / radius)
         playReturnByDeathSound(server, player);
@@ -71,41 +91,82 @@ public final class DeathHandler {
             newLoopCount = state.incrementDeathCount(player.getUuid());
         }
 
-        // 3. Add to death log
+        // 3. Add to death log (with nice cause string)
         Vec3d pos = player.getPos();
         state.addDeathLog(player.getUuid(), new RBDState.DeathRecord(
                 now,
                 player.getWorld().getRegistryKey().getValue().toString(),
                 pos.x, pos.y, pos.z,
-                source.getName()
+                causeStr
         ));
 
-        // 4. Notify the dying player and broadcast
+        // 4. Show death title + subtitle overlay
+        showDeathTitle(player, newLoopCount);
+
+        // 5. Notify the dying player and broadcast
         player.sendMessage(Text.literal("\u00a7d\u00a7l[Return By Death] \u00a7r\u00a7dYou have died. Returning to your save point..."), false);
         if (newLoopCount > 0) {
             player.sendMessage(Text.literal("\u00a77  Loop count: \u00a7e" + newLoopCount + "\u00a77  (this is death #" + newLoopCount + ")"), false);
+            player.sendMessage(Text.literal("\u00a77  Cause: \u00a7c" + causeStr), false);
         }
         if (RBDGameRules.broadcastDeath(server)) {
             Text msg = Text.literal("\u00a7d\u00a7l[Return By Death] \u00a7r\u00a77" + player.getName().getString() + " has died and rewound to their save point.");
             broadcastToPlayers(server, player, msg, false);
         }
 
-        // 5. Restore state
+        // 6. Restore state
         boolean restored = SaveManager.restore(player);
         if (!restored) {
             return false;
         }
 
-        // 6. Brief invulnerability (3 seconds)
+        // 7. Brief invulnerability (3 seconds)
         player.setInvulnerabilityTicks(60);
 
-        // 7. Set cooldown
+        // 8. Set cooldown
         int cooldownSeconds = RBDGameRules.cooldownSeconds(server);
         if (cooldownSeconds > 0) {
             COOLDOWN_UNTIL.put(player.getUuid(), now + (cooldownSeconds * 1000L));
         }
 
         return true; // cancel vanilla death handling
+    }
+
+    /**
+     * Revert - instantly teleport the player back to their save point without dying.
+     * Used by the /rbd revert command. Respects cooldown and save-point existence.
+     *
+     * Returns null on success, or an error message on failure.
+     */
+    public static String revert(ServerPlayerEntity player) {
+        MinecraftServer server = player.getServer();
+        if (server == null) return "No server";
+        if (!RBDGameRules.enabled(server)) return "Mod is disabled";
+
+        Long cdUntil = COOLDOWN_UNTIL.get(player.getUuid());
+        long now = System.currentTimeMillis();
+        if (cdUntil != null && cdUntil > now) {
+            long seconds = (cdUntil - now) / 1000;
+            return "Cooldown active: " + seconds + " more second(s)";
+        }
+
+        if (!SaveManager.hasSave(player.getUuid())) {
+            return "No save point exists";
+        }
+
+        boolean restored = SaveManager.restore(player);
+        if (!restored) return "Failed to restore save point";
+
+        player.setInvulnerabilityTicks(40); // 2 seconds for voluntary revert
+        player.sendMessage(Text.literal("\u00a7d\u00a7l[Return By Death] \u00a7r\u00a7aReverted to your save point."), false);
+
+        // Set cooldown on revert too (so players can't spam it)
+        int cooldownSeconds = RBDGameRules.cooldownSeconds(server);
+        if (cooldownSeconds > 0) {
+            COOLDOWN_UNTIL.put(player.getUuid(), now + (cooldownSeconds * 1000L));
+        }
+
+        return null; // success
     }
 
     /** Per-tick update. Currently only used to display action bar cooldown. */
@@ -124,6 +185,36 @@ public final class DeathHandler {
         long seconds = (cdUntil - now + 999) / 1000;
         Text msg = Text.literal("\u00a7c\u00a7l[Return By Death] \u00a7r\u00a7cCooldown: \u00a7e" + seconds + "s");
         player.sendMessage(msg, true); // overlay = action bar
+    }
+
+    private static void showDeathTitle(ServerPlayerEntity player, int loopCount) {
+        // Title: "Returned By Death"
+        // Subtitle: "Loop #X"
+        try {
+            Text title = Text.literal("\u00a7d\u00a7lReturned By Death");
+            Text subtitle;
+            if (loopCount > 0) {
+                subtitle = Text.literal("\u00a77Loop \u00a7e#" + loopCount);
+            } else {
+                subtitle = Text.literal("\u00a77The Witch smiles...");
+            }
+            // Fade in 10 ticks, stay 60 ticks, fade out 20 ticks
+            player.getServer().execute(() -> {
+                // 1.20.1 API: networkHandler.sendPacket with TitleS2CPacket
+                var network = player.networkHandler;
+                var titlePacket = new net.minecraft.network.packet.s2c.play.TitleS2CPacket(
+                        net.minecraft.network.packet.s2c.play.TitleS2CPacket.Action.TITLE, title);
+                var subtitlePacket = new net.minecraft.network.packet.s2c.play.TitleS2CPacket(
+                        net.minecraft.network.packet.s2c.play.TitleS2CPacket.Action.SUBTITLE, subtitle);
+                var timesPacket = new net.minecraft.network.packet.s2c.play.TitleS2CPacket(
+                        10, 60, 20);
+                network.sendPacket(titlePacket);
+                network.sendPacket(subtitlePacket);
+                network.sendPacket(timesPacket);
+            });
+        } catch (Throwable t) {
+            ReturnByDeathMod.LOGGER.warn("[RBD] Failed to show death title: {}", t.getMessage());
+        }
     }
 
     private static void playReturnByDeathSound(MinecraftServer server, ServerPlayerEntity source) {
