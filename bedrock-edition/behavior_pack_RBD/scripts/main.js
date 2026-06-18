@@ -1,8 +1,18 @@
 /**
- * Return By Death - Bedrock Edition (incl. Pocket Edition) - v1.2.2 HOTFIX
+ * Return By Death - Bedrock Edition (incl. Pocket Edition) - v1.2.3 HOTFIX
  * =======================================================================
  *
  * Inspired by Subaru Natsuki's ability from Re:Zero.
+ *
+ * v1.2.3 HOTFIX: Fixed two critical bugs reported by users:
+ *   1. "RBD not working after first save" - caused by save.health being 0 (race condition
+ *      during death), which made the player instantly re-die after restore. Now clamps
+ *      health to min 1 and hunger to min 6.
+ *   2. "Spawning outside the RBD spawn point" - caused by Bedrock's respawn logic
+ *      overriding our teleport. Now teleports TWICE: once after 5 ticks, once after
+ *      15 ticks, to ensure the position sticks.
+ *   New commands: /rbd:forcerestore (manual restore), /rbd:debug_save (show save details).
+ *   Added detailed logging to restoreSave for troubleshooting.
  *
  * v1.2.2 HOTFIX: Layer 1 (CustomCommandRegistry) was broken in v1.2.1 because it
  *   registered commands but used a non-existent 'system.afterEvents.customCommand'
@@ -239,6 +249,26 @@ function captureSave(player) {
 }
 
 function restoreSave(player, save) {
+  log("restoreSave: starting for player", player.name);
+
+  // === v1.2.3 BUGFIX: Health safety check ===
+  // If save.health is 0 or negative (race condition: save was taken at moment of death),
+  // the player would instantly re-die after restore. Fall back to max health.
+  let safeHealth = save.health;
+  if (safeHealth <= 0) {
+    log("restoreSave: WARNING save.health was", safeHealth, "- falling back to 20 (max)");
+    safeHealth = 20;
+  }
+  // Also clamp hunger to at least 6 so the player can sprint/heal
+  let safeHunger = save.hunger;
+  if (safeHunger < 6) {
+    log("restoreSave: WARNING save.hunger was", safeHunger, "- clamping to 6");
+    safeHunger = 6;
+  }
+
+  // === TELEPORT (attempt 1 of 2) ===
+  // v1.2.3 BUGFIX: Teleport can fail silently if called too soon after respawn.
+  // We teleport twice - once immediately, once after a delay - to ensure it sticks.
   try {
     const targetDim = world.getDimension(save.dimensionId);
     player.teleport({ x: save.x, y: save.y, z: save.z }, {
@@ -246,19 +276,28 @@ function restoreSave(player, save) {
       rotation: { x: save.rx, y: save.ry },
       keepVelocity: false,
     });
+    log("restoreSave: teleport #1 OK to", save.x, save.y, save.z);
   } catch (e) {
-    log("Teleport failed:", e);
+    log("restoreSave: teleport #1 FAILED:", e);
   }
 
-  const invComp = player.getComponent("minecraft:inventory");
-  if (invComp && invComp.container) {
-    const c = invComp.container;
-    for (let i = 0; i < c.size; i++) c.setItem(i, undefined);
-    for (const { slot, item } of save.inventory) {
-      try { c.setItem(slot, item); } catch (e) { log("set slot failed:", e); }
+  // === Restore inventory ===
+  try {
+    const invComp = player.getComponent("minecraft:inventory");
+    if (invComp && invComp.container) {
+      const c = invComp.container;
+      for (let i = 0; i < c.size; i++) c.setItem(i, undefined);
+      let restoredCount = 0;
+      for (const { slot, item } of save.inventory) {
+        try { c.setItem(slot, item); restoredCount++; } catch (e) { log("restoreSave: set slot", slot, "failed:", e); }
+      }
+      log("restoreSave: restored", restoredCount, "of", save.inventory.length, "inventory items");
     }
+  } catch (e) {
+    log("restoreSave: inventory restore failed:", e);
   }
 
+  // === Restore armor ===
   try {
     const eqComp = player.getComponent("minecraft:equippable");
     if (eqComp) {
@@ -269,8 +308,20 @@ function restoreSave(player, save) {
     }
   } catch (_) {}
 
-  try { const h = player.getComponent("minecraft:health"); if (h) h.setCurrentValue(save.health); } catch (_) {}
-  try { const hu = player.getComponent("minecraft:hunger"); if (hu) hu.setCurrentValue(save.hunger); } catch (_) {}
+  // === Restore vitals (with safety clamps) ===
+  try {
+    const h = player.getComponent("minecraft:health");
+    if (h) {
+      h.setCurrentValue(safeHealth);
+      log("restoreSave: health set to", safeHealth);
+    }
+  } catch (e) { log("restoreSave: health restore failed:", e); }
+
+  try {
+    const hu = player.getComponent("minecraft:hunger");
+    if (hu) hu.setCurrentValue(safeHunger);
+  } catch (_) {}
+
   try {
     const xp = player.getComponent("minecraft:experience");
     if (xp) {
@@ -280,6 +331,7 @@ function restoreSave(player, save) {
     }
   } catch (_) {}
 
+  // === Restore effects ===
   try {
     const existing = player.getEffects();
     if (existing && Array.isArray(existing)) {
@@ -295,14 +347,15 @@ function restoreSave(player, save) {
             showParticles: e.showParticles,
           });
         } catch (err) {
-          log("Failed to restore effect:", e.typeId, err);
+          log("restoreSave: Failed to restore effect:", e.typeId, err);
         }
       }
     }
   } catch (e) {
-    log("Effects restore failed:", e);
+    log("restoreSave: Effects restore failed:", e);
   }
 
+  // === Restore fire ===
   try {
     if (save.onFire && save.fireTicks > 0) {
       player.setOnFire(save.fireTicks, true);
@@ -311,10 +364,35 @@ function restoreSave(player, save) {
     }
   } catch (_) {}
 
+  // === Invulnerability window ===
   try {
     player.addEffect("minecraft:resistance", INVULN_TICKS_AFTER_RETURN, { amplifier: 4, showParticles: false });
     player.addEffect("minecraft:fire_resistance", INVULN_TICKS_AFTER_RETURN, { amplifier: 1, showParticles: false });
   } catch (_) {}
+
+  log("restoreSave: completed for", player.name);
+}
+
+/**
+ * v1.2.3: Re-teleports the player to the save point after a delay.
+ * This is called separately from restoreSave because Bedrock's respawn logic
+ * can override the first teleport. The second teleport (after 10 ticks) ensures
+ * the player actually ends up at the save point.
+ */
+function reTeleportToSave(player, save) {
+  try {
+    const targetDim = world.getDimension(save.dimensionId);
+    player.teleport({ x: save.x, y: save.y, z: save.z }, {
+      dimension: targetDim,
+      rotation: { x: save.rx, y: save.ry },
+      keepVelocity: false,
+    });
+    log("reTeleportToSave: teleport #2 OK (confirmation teleport)");
+  } catch (e) {
+    log("reTeleportToSave: teleport #2 FAILED:", e);
+    // Last resort: tell the player the coordinates
+    announce(player, `\u00a7cCould not auto-teleport. Use \u00a7e!rbd forcerestore\u00a7c or go to ${Math.floor(save.x)}, ${Math.floor(save.y)}, ${Math.floor(save.z)}`);
+  }
 }
 
 function playReturnByDeathSound(deathLoc, deathDimId) {
@@ -748,7 +826,10 @@ world.afterEvents.playerDie.subscribe((ev) => {
   }
 });
 
-// On respawn
+// On respawn - restore state
+// v1.2.3 BUGFIX: Use double-teleport with delays to fix "spawning outside save point".
+//   The first teleport (in restoreSave) can be overridden by Bedrock's respawn logic.
+//   The second teleport (after 10 ticks) confirms the position sticks.
 world.afterEvents.playerSpawn.subscribe((ev) => {
   if (ev.initialSpawn) return;
   const player = ev.player;
@@ -762,6 +843,9 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
     return;
   }
 
+  log("onRespawn: player", player.name, "respawned with pending return. Scheduling restore.");
+
+  // Clear dropped items near death location (immediate)
   system.run(() => {
     try {
       const deathLoc = deathLocations.get(player.id);
@@ -769,13 +853,34 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
         clearDroppedItemsNear({ x: deathLoc.x, y: deathLoc.y, z: deathLoc.z }, deathLoc.dimensionId);
         deathLocations.delete(player.id);
       }
+    } catch (e) {
+      log("onRespawn: clear dropped items failed:", e);
+    }
+  });
+
+  // FIRST restore attempt: after 5 ticks (let the player fully spawn)
+  system.runTimeout(() => {
+    try {
+      log("onRespawn: running restoreSave (attempt 1)");
       restoreSave(player, save);
       announce(player, `\u00a7aReturned to your save point at \u00a77${Math.floor(save.x)}, ${Math.floor(save.y)}, ${Math.floor(save.z)}\u00a7a in \u00a7b${save.dimensionId.replace("minecraft:", "")}\u00a7a.`);
     } catch (e) {
-      log("Restore on respawn failed:", e);
-      announce(player, "\u00a7cFailed to restore state. Check console for details.");
+      log("onRespawn: restoreSave attempt 1 FAILED:", e);
+      announce(player, "\u00a7cFirst restore attempt failed. Retrying...");
     }
-  });
+  }, 5);
+
+  // SECOND teleport: after 10 more ticks (15 total) to confirm position sticks
+  // v1.2.3: This is the KEY fix for "spawning outside save point"
+  system.runTimeout(() => {
+    try {
+      if (player && player.isValid()) {
+        reTeleportToSave(player, save);
+      }
+    } catch (e) {
+      log("onRespawn: reTeleport failed:", e);
+    }
+  }, 15);
 });
 
 // Revert function
@@ -904,7 +1009,7 @@ try {
         }
 
         // Player commands (no params): permissionLevel Any, cheatsRequired false
-        const playerSimple = ["save", "info", "status", "loops", "looplog", "lastdeath", "revert", "testsound", "reset", "debug", "help"];
+        const playerSimple = ["save", "info", "status", "loops", "looplog", "lastdeath", "revert", "testsound", "reset", "debug", "forcerestore", "debug_save", "help"];
         let playerRegistered = 0;
         for (const cmd of playerSimple) {
           if (registerSimple(`rbd:${cmd}`, `Return By Death - ${cmd}`, PERM_ANY, false)) playerRegistered++;
@@ -1123,7 +1228,7 @@ function handleCommand(player, sub, parts) {
       break;
     }
     case "status": {
-      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.2 Status ===");
+      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.3 Status ===");
       announce(player, `\u00a7aEnabled: \u00a77${CONFIG.enabled}`);
       announce(player, `\u00a7aSave interval (sec): \u00a77${CONFIG.saveIntervalSeconds}`);
       announce(player, `\u00a7aCooldown (sec): \u00a77${CONFIG.cooldownSeconds}`);
@@ -1262,7 +1367,7 @@ function handleCommand(player, sub, parts) {
       break;
     }
     case "debug": {
-      announce(player, "\u00a7d\u00a7l=== RBD v1.2.2 Command Layers ===");
+      announce(player, "\u00a7d\u00a7l=== RBD v1.2.3 Command Layers ===");
       announce(player, `\u00a7aLayer 1 - CustomCommandRegistry (/rbd:*): \u00a77${LAYERS.customCommand ? "\u00a7aACTIVE" : "\u00a7cINACTIVE (need Bedrock 1.21.80+)"}`);
       announce(player, `\u00a7aLayer 2 - chatSend (!rbd chat): \u00a77${LAYERS.chatSend ? "\u00a7aACTIVE" : "\u00a7cINACTIVE (may need Beta APIs toggle)"}`);
       announce(player, `\u00a7aLayer 3 - RBD Notebook item UI: \u00a77${LAYERS.itemUI ? "\u00a7aACTIVE" : "\u00a7cINACTIVE"}`);
@@ -1270,9 +1375,56 @@ function handleCommand(player, sub, parts) {
       announce(player, "\u00a77Layer 3 (RBD Notebook) should ALWAYS work - check your inventory for the notebook.");
       break;
     }
+    case "debug_save": {
+      // v1.2.3: Debug the current save state
+      const s = saves.get(player.id);
+      if (!s) {
+        announce(player, "\u00a7cNo save point in memory. Auto-save runs every " + CONFIG.saveIntervalSeconds + "s.");
+      } else {
+        announce(player, "\u00a7d\u00a7l=== RBD Save Debug ===");
+        announce(player, `\u00a7aPosition: \u00a77${s.x.toFixed(2)}, ${s.y.toFixed(2)}, ${s.z.toFixed(2)}`);
+        announce(player, `\u00a7aRotation: \u00a77${s.rx.toFixed(1)}, ${s.ry.toFixed(1)}`);
+        announce(player, `\u00a7aDimension: \u00a7b${s.dimensionId}`);
+        announce(player, `\u00a7aHealth: \u00a7c${s.health}\u00a7a  Hunger: \u00a76${s.hunger}\u00a7a  XP: \u00a7e${s.xpLevel}`);
+        announce(player, `\u00a7aInventory items: \u00a77${s.inventory.length}`);
+        announce(player, `\u00a7aEffects: \u00a77${(s.effects || []).length}`);
+        announce(player, `\u00a7aFire: \u00a77${s.onFire ? "yes (" + s.fireTicks + " ticks)" : "no"}`);
+        const agoSec = Math.floor((Date.now() - s.timestamp) / 1000);
+        announce(player, `\u00a7aSaved: \u00a77${agoSec}s ago`);
+        announce(player, `\u00a7aYour current pos: \u00a77${player.location.x.toFixed(2)}, ${player.location.y.toFixed(2)}, ${player.location.z.toFixed(2)}`);
+        const dist = Math.sqrt(
+          Math.pow(player.location.x - s.x, 2) +
+          Math.pow(player.location.y - s.y, 2) +
+          Math.pow(player.location.z - s.z, 2)
+        );
+        announce(player, `\u00a7aDistance from save: \u00a77${dist.toFixed(1)} blocks`);
+      }
+      break;
+    }
+    case "forcerestore": {
+      // v1.2.3: Manually trigger a restore from the save point
+      const s = saves.get(player.id);
+      if (!s) {
+        announce(player, "\u00a7cNo save point exists. Use !rbd save first.");
+        break;
+      }
+      announce(player, "\u00a7dForce-restoring to save point...");
+      try {
+        restoreSave(player, s);
+        // Also schedule a re-teleport
+        system.runTimeout(() => {
+          try { reTeleportToSave(player, s); } catch (_) {}
+        }, 10);
+        announce(player, `\u00a7aForce-restored to \u00a77${Math.floor(s.x)}, ${Math.floor(s.y)}, ${Math.floor(s.z)}\u00a7a.`);
+      } catch (e) {
+        announce(player, "\u00a7cForce restore failed: " + e);
+        log("forcerestore failed:", e);
+      }
+      break;
+    }
     case "help":
     default: {
-      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.2 Help ===");
+      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.3 Help ===");
       announce(player, "\u00a76Three ways to run commands:");
       announce(player, "\u00a7a  1. Slash commands: \u00a77/rbd:save, /rbd:info, etc. (Bedrock 1.21.80+)");
       announce(player, "\u00a7a  2. Chat commands: \u00a77!rbd save, !rbd info, etc. (older Bedrock)");
@@ -1280,6 +1432,8 @@ function handleCommand(player, sub, parts) {
       announce(player, "\u00a76Player commands:");
       announce(player, "\u00a7a  save, info, status, loops, looplog, lastdeath");
       announce(player, "\u00a7a  revert, testsound, reset, particles, debug");
+      announce(player, "\u00a7a  forcerestore \u00a77- manually teleport to save point (v1.2.3)");
+      announce(player, "\u00a7a  debug_save \u00a77- show save point details + distance (v1.2.3)");
       announce(player, "\u00a7a  named <name> | named list | named delete <name>");
       announce(player, "\u00a76Op commands:");
       announce(player, "\u00a7a  interval <sec>, cooldown <sec>, broadcast <on|off>");
@@ -1366,7 +1520,7 @@ function pad(n) { return n < 10 ? "0" + n : String(n); }
 
 // ============================ Init Log ============================
 
-log("Return By Death v1.2.2 (Bedrock Edition) loaded.");
+log("Return By Death v1.2.3 (Bedrock Edition) loaded.");
 log(`Save interval: ${CONFIG.saveIntervalSeconds}s. Inspired by Subaru Natsuki from Re:Zero.`);
 log("Sound is in resource_pack_RBD (NOT behavior pack).");
 log("Command layers - Layer 1 (CustomCommandRegistry): " + (LAYERS.customCommand ? "ACTIVE" : "inactive"));

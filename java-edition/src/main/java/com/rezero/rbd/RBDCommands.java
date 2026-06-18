@@ -66,6 +66,8 @@ public final class RBDCommands {
                             .then(literal("reset").executes(RBDCommands::reset))
                             .then(literal("revert").executes(RBDCommands::revert))
                             .then(literal("testsound").executes(RBDCommands::testsound))
+                            .then(literal("forcerestore").executes(RBDCommands::forcerestore))
+                            .then(literal("debugsave").executes(RBDCommands::debugsave))
 
                             .then(literal("named")
                                     .then(argument("name", StringArgumentType.word()).executes(RBDCommands::namedCreate))
@@ -138,7 +140,7 @@ public final class RBDCommands {
 
     private static int status(CommandContext<ServerCommandSource> ctx) {
         var server = ctx.getSource().getServer();
-        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== Return By Death v1.2.2 Status ==="), false);
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== Return By Death v1.2.3 Status ==="), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7aEnabled: \u00a77" + RBDGameRules.enabled(server)), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7aSave interval (sec): \u00a77" + RBDGameRules.saveIntervalSeconds(server)), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7aCooldown (sec): \u00a77" + RBDGameRules.cooldownSeconds(server)), false);
@@ -262,6 +264,62 @@ public final class RBDCommands {
         return 1;
     }
 
+    // v1.2.3: Force restore - manually trigger a restore from the save point
+    private static int forcerestore(CommandContext<ServerCommandSource> ctx) {
+        ServerPlayerEntity player = ctx.getSource().getPlayer();
+        if (player == null) { ctx.getSource().sendFeedback(() -> Text.literal("\u00a7cOnly players can use this command."), false); return 0; }
+        if (!SaveManager.hasSave(player.getUuid())) {
+            ctx.getSource().sendFeedback(() -> Text.literal("\u00a7cNo save point exists. Use /rbd save first."), false);
+            return 0;
+        }
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7dForce-restoring to save point..."), false);
+        boolean ok = SaveManager.restore(player);
+        if (ok) {
+            var s = SaveManager.getSave(player.getUuid());
+            if (s != null) {
+                player.setInvulnerabilityTicks(40);
+                ctx.getSource().sendFeedback(() -> Text.literal(
+                        String.format("\u00a7d[RBD] \u00a7aForce-restored to \u00a77%.1f, %.1f, %.1f\u00a7a in \u00a7b%s\u00a7a.",
+                                s.x, s.y, s.z, s.worldKey.getValue())), false);
+            }
+        } else {
+            ctx.getSource().sendFeedback(() -> Text.literal("\u00a7cForce restore failed."), false);
+        }
+        return 1;
+    }
+
+    // v1.2.3: Debug save - show save point details + distance from current position
+    private static int debugsave(CommandContext<ServerCommandSource> ctx) {
+        ServerPlayerEntity player = ctx.getSource().getPlayer();
+        if (player == null) { ctx.getSource().sendFeedback(() -> Text.literal("\u00a7cOnly players can use this command."), false); return 0; }
+        var s = SaveManager.getSave(player.getUuid());
+        if (s == null) {
+            ctx.getSource().sendFeedback(() -> Text.literal("\u00a7cNo save point in memory."), false);
+            return 1;
+        }
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== RBD Save Debug ==="), false);
+        ctx.getSource().sendFeedback(() -> Text.literal(
+                String.format("\u00a7aPosition: \u00a77%.2f, %.2f, %.2f", s.x, s.y, s.z)), false);
+        ctx.getSource().sendFeedback(() -> Text.literal(
+                String.format("\u00a7aRotation: \u00a77%.1f, %.1f", s.yaw, s.pitch)), false);
+        ctx.getSource().sendFeedback(() -> Text.literal(
+                "\u00a7aDimension: \u00a7b" + s.worldKey.getValue()), false);
+        ctx.getSource().sendFeedback(() -> Text.literal(
+                String.format("\u00a7aHealth: \u00a7c%.1f\u00a7a  Hunger: \u00a76%d\u00a7a  XP: \u00a7e%d", s.health, s.hunger, s.xpLevel)), false);
+        ctx.getSource().sendFeedback(() -> Text.literal(
+                String.format("\u00a7aInventory items: \u00a77%d  Effects: \u00a77%d",
+                        (s.mainInventory != null ? s.mainInventory.length : 0),
+                        (s.effectsNbt != null ? s.effectsNbt.size() : 0))), false);
+        double dist = Math.sqrt(
+                Math.pow(player.getX() - s.x, 2) +
+                Math.pow(player.getY() - s.y, 2) +
+                Math.pow(player.getZ() - s.z, 2)
+        );
+        ctx.getSource().sendFeedback(() -> Text.literal(
+                String.format("\u00a7aDistance from save: \u00a77%.1f blocks", dist)), false);
+        return 1;
+    }
+
     private static int namedCreate(CommandContext<ServerCommandSource> ctx) {
         ServerPlayerEntity player = ctx.getSource().getPlayer();
         if (player == null) { ctx.getSource().sendFeedback(() -> Text.literal("\u00a7cOnly players can use this command."), false); return 0; }
@@ -318,7 +376,7 @@ public final class RBDCommands {
     }
 
     private static int help(CommandContext<ServerCommandSource> ctx) {
-        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== Return By Death v1.2.2 Help ==="), false);
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7d\u00a7l=== Return By Death v1.2.3 Help ==="), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a76Player commands:"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd save \u00a77- Manually create a save point now"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd info \u00a77- Show your current save point details"), false);
@@ -328,6 +386,8 @@ public final class RBDCommands {
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd lastdeath \u00a77- Show details of your most recent death"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd revert \u00a77- Instantly teleport to your save point (no death)"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd testsound \u00a77- Play the Return By Death sound to verify it works"), false);
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd forcerestore \u00a77- Manually force-restore to save point (v1.2.3)"), false);
+        ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd debugsave \u00a77- Show save details + distance (v1.2.3)"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd reset \u00a77- Clear your save point (permadeath mode)"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd named <name> \u00a77- Create a named save point"), false);
         ctx.getSource().sendFeedback(() -> Text.literal("\u00a7a/rbd named list \u00a77- List your named save points"), false);

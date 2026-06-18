@@ -196,8 +196,18 @@ public final class SaveManager {
         inv.markDirty();
 
         // Restore vitals
-        player.setHealth(save.health);
-        player.getHungerManager().setFoodLevel(save.hunger);
+        // v1.2.3 BUGFIX: Health safety check - if save.health is 0 or negative (race condition
+        // during death), fall back to max health to prevent instant re-death.
+        float safeHealth = save.health;
+        if (safeHealth <= 0) {
+            ReturnByDeathMod.LOGGER.warn("[RBD] save.health was {} - falling back to max health {}", safeHealth, save.maxHealth);
+            safeHealth = Math.max(1.0f, save.maxHealth);
+        }
+        // Clamp hunger to at least 6 so the player can sprint/heal
+        int safeHunger = Math.max(6, save.hunger);
+
+        player.setHealth(safeHealth);
+        player.getHungerManager().setFoodLevel(safeHunger);
         player.getHungerManager().setSaturationLevel(save.saturation);
         player.getHungerManager().setExhaustion(save.exhaustion);
         player.setAir(save.air);

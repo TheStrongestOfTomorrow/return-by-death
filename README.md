@@ -7,7 +7,57 @@ A Minecraft mod inspired by **Subaru Natsuki's "Return By Death"** ability from 
 
 **Available for both Minecraft Java Edition (Fabric) and Minecraft Bedrock Edition (incl. Pocket Edition).**
 
-**Current version: v1.2.2** — see [What's New](#whats-new-in-v122) below.
+**Current version: v1.2.3** — see [What's New](#whats-new-in-v123) below.
+
+---
+
+## What's New in v1.2.3 (HOTFIX)
+
+Fixes two critical bugs reported by users after v1.2.2:
+
+### 🐛 Bug 1: "RBD not working after first save"
+
+**Root cause:** If a save was captured at the exact moment of death (race condition), `save.health` could be `0`. When the player respawned and we restored health to `0`, the player instantly died again — making it look like RBD "didn't work".
+
+**Fix:** `restoreSave` now clamps health to a minimum of 1 (falls back to max health if save was 0) and hunger to a minimum of 6. The player will always spawn alive and able to sprint/heal.
+
+### 🐛 Bug 2: "Spawning outside the RBD spawn point"
+
+**Root cause:** Bedrock's respawn logic puts the player at world spawn, then fires `playerSpawn`. Our teleport ran 1 tick later — but Bedrock could override it on ticks 2-3 as the player entity finished materializing, leaving the player at world spawn instead of the save point.
+
+**Fix:** v1.2.3 now teleports **TWICE**:
+1. **Teleport #1** after 5 ticks — restores position, inventory, vitals, effects
+2. **Teleport #2** after 15 ticks — confirmation teleport to ensure the position sticks
+
+If both teleports somehow fail, the player gets a chat message with the save point coordinates and a prompt to use `/rbd forcerestore`.
+
+### ✨ New Commands (v1.2.3)
+
+| Command | Description |
+|---------|-------------|
+| `/rbd forcerestore` (Java) / `!rbd forcerestore` or `/rbd:forcerestore` (Bedrock) | Manually trigger a restore from your save point. Use this if the automatic restore on death fails. |
+| `/rbd debugsave` (Java) / `!rbd debug_save` or `/rbd:debug_save` (Bedrock) | Show your current save point details: position, rotation, dimension, health, hunger, XP, inventory count, effects count, fire state, age of save, and your distance from the save point. |
+
+### 📊 Better Logging
+
+`restoreSave` now logs every step to the script console:
+- Start/completion
+- Teleport success/failure (with coordinates)
+- Inventory items restored count
+- Health value being set (with warning if it was 0)
+- Any per-slot failures
+
+This makes it much easier to diagnose restore issues. Check the Bedrock content log (or server console) for `[RBD] restoreSave:` messages.
+
+### How to test the fix
+
+1. Install v1.2.3 packs
+2. Save & quit the world, re-enter
+3. Run `/rbd save` to create a save point
+4. Run `/rbd debugsave` to verify the save is correct
+5. Die (e.g. `/kill` in Java, or jump into lava)
+6. You should respawn at the save point — not at world spawn
+7. If it still fails, check the console for `[RBD]` log messages, then run `/rbd forcerestore` to manually teleport
 
 ---
 
@@ -502,14 +552,14 @@ return-by-death/
 
 | Edition | Mod version | MC version         | Status      |
 |---------|-------------|--------------------|-------------|
-| Java    | v1.0.0 / v1.1.0 / v1.2.0 / v1.2.1 / v1.2.2 | 1.20.1 (Fabric)    | ✅ Supported |
-| Java    | v1.2.2      | 1.21.x / 26.x      | 🚧 Planned  |
-| Bedrock | v1.0.0      | 1.21+              | ✅ Supported |
-| Bedrock | v1.1.0      | 1.21+ (incl. 1.26.x) | ✅ Supported |
-| Bedrock | v1.2.0      | 1.21+ (incl. 1.26.x) | ✅ Supported |
-| Bedrock | v1.2.1      | 1.21+ (incl. 1.26.x) | ⚠️ Layer 1 broken — use v1.2.2 |
-| Bedrock | v1.2.2      | 1.21+ (incl. 1.26.x) | ✅ Supported (recommended) |
-| Bedrock | v1.2.2      | Pocket Edition     | ✅ Supported |
+| Java    | v1.0.0 – v1.2.2 | 1.20.1 (Fabric)    | ✅ Supported |
+| Java    | v1.2.3      | 1.20.1 (Fabric)    | ✅ Supported (recommended) |
+| Java    | v1.2.3      | 1.21.x / 26.x      | 🚧 Planned  |
+| Bedrock | v1.0.0 – v1.2.0 | 1.21+              | ✅ Supported |
+| Bedrock | v1.2.1      | 1.21+ (incl. 1.26.x) | ⚠️ Layer 1 broken — use v1.2.3 |
+| Bedrock | v1.2.2      | 1.21+ (incl. 1.26.x) | ⚠️ Restore bugs — use v1.2.3 |
+| Bedrock | v1.2.3      | 1.21+ (incl. 1.26.x) | ✅ Supported (recommended) |
+| Bedrock | v1.2.3      | Pocket Edition     | ✅ Supported |
 
 The mod is server-authoritative — it works on dedicated servers, realms (Java), and shared worlds. Bedrock requires the world to have BOTH the behavior AND resource packs active.
 
@@ -533,8 +583,9 @@ The mod is server-authoritative — it works on dedicated servers, realms (Java)
 | v1.0.0  | 2026-06-18 | Initial release: core rewind mechanic + sound        |
 | v1.1.0  | 2026-06-18 | Major feature update: configurable interval, death counter, death log, particle beacon, named saves, configurable sound/broadcast, action bar cooldown, reset command |
 | v1.2.0  | 2026-06-18 | Default interval 20s, Bedrock saves potion effects + fire ticks, death title overlay, save indicator, `/rbd revert` + `/rbd lastdeath` + `/rbd testsound`, better cause reporting |
-| v1.2.1  | 2026-06-18 | Bedrock command fix (3 layers). New `/rbd debug` command. Tier 1 RBD flavor: witch scent, death quotes, heartbeat at low HP, "Witch watching" message. **⚠️ Layer 1 (CustomCommandRegistry) was broken — use v1.2.2 instead.** |
-| v1.2.2  | 2026-06-18 | **HOTFIX**: Fixed Layer 1 CustomCommandRegistry — slash commands `/rbd:save` etc. now actually work on Bedrock 1.21.80+. Added `cheatsRequired: false`, proper `CommandPermissionLevel` enums, mandatoryParameters for autocomplete. |
+| v1.2.1  | 2026-06-18 | Bedrock command fix (3 layers). Tier 1 RBD flavor. **⚠️ Layer 1 broken — use v1.2.3.** |
+| v1.2.2  | 2026-06-18 | HOTFIX: Fixed Layer 1 CustomCommandRegistry. **⚠️ Restore bugs (health=0, teleport timing) — use v1.2.3.** |
+| v1.2.3  | 2026-06-18 | **HOTFIX**: Fixed RBD not working after first save (health=0 race condition). Fixed spawning outside save point (double-teleport with delays). New `/rbd forcerestore` + `/rbd debugsave`. Better logging. |
 
 Old releases are never deleted — find them all at [the Releases page](../../releases).
 
