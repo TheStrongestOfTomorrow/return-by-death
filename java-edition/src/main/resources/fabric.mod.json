@@ -3,14 +3,14 @@
   "id": "rbd",
   "version": "${version}",
   "name": "Return By Death",
-  "description": "A Re:Zero-inspired mod. When you die, you rewind to your last save point (recorded every 5 seconds) with the inventory you had at that moment. Plays the iconic Return By Death sound on death. Requires Instant Respawn.\n\nInspired by Subaru Natsuki's ability from Re:Zero.",
+  "description": "A Re:Zero-inspired mod. When you die, you rewind to your last save point (recorded every 5 seconds, configurable) with the inventory you had at that moment. Plays the iconic Return By Death sound on death. Requires Instant Respawn.\n\nv1.1.0 adds: configurable save interval, death counter ('loops'), death log, particle beacon, named save points, configurable sound volume/pitch/broadcast radius, save-point reset, action bar cooldown display.\n\nInspired by Subaru Natsuki's ability from Re:Zero.",
   "authors": [
     "Return By Death Mod Team"
   ],
   "contact": {
-    "homepage": "https://github.com/rezero-mod/return-by-death",
-    "sources": "https://github.com/rezero-mod/return-by-death",
-    "issues": "https://github.com/rezero-mod/return-by-death/issues"
+    "homepage": "https://github.com/TheStrongestOfTomorrow/return-by-death",
+    "sources": "https://github.com/TheStrongestOfTomorrow/return-by-death",
+    "issues": "https://github.com/TheStrongestOfTomorrow/return-by-death/issues"
   },
   "license": "MIT",
   "icon": "assets/rbd/icon.png",

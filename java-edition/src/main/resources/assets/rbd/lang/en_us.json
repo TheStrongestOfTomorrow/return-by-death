@@ -8,5 +8,23 @@
   "rbd.message.instant_respawn_enabled": "Return By Death has enabled Instant Respawn for you.",
   "rbd.message.save_point_set": "Manual save point set at %s, %s, %s",
   "rbd.message.cooldown_active": "Return By Death is on cooldown: %s seconds remaining",
-  "death.attack.return_by_death": "%s was killed but Returned By Death"
+  "rbd.message.loop_count": "Loop count: %s",
+  "rbd.message.save_point_cleared": "Save point cleared - next death will be permanent",
+  "rbd.message.named_save_created": "Named save point '%s' created",
+  "rbd.message.named_save_deleted": "Named save point '%s' deleted",
+  "rbd.message.max_named_reached": "Maximum named save points reached (%s)",
+  "death.attack.return_by_death": "%s was killed but Returned By Death",
+
+  "gamerule.rbdEnabled": "Return By Death - Master toggle",
+  "gamerule.rbdSaveIntervalSeconds": "Return By Death - Save interval in seconds (1-600)",
+  "gamerule.rbdCooldownSeconds": "Return By Death - Cooldown seconds before next rewind",
+  "gamerule.rbdBroadcastDeath": "Return By Death - Broadcast message when a player rewinds",
+  "gamerule.rbdBroadcastRadius": "Return By Death - Broadcast radius in blocks (-1 = global)",
+  "gamerule.rbdKeepInventoryOnDeath": "Return By Death - Keep inventory on death",
+  "gamerule.rbdSoundVolume": "Return By Death - Sound volume percent (0-100)",
+  "gamerule.rbdSoundPitch": "Return By Death - Sound pitch percent (50-200)",
+  "gamerule.rbdParticleBeaconEnabled": "Return By Death - Show particles at save point",
+  "gamerule.rbdDeathCounterEnabled": "Return By Death - Track each player's death count",
+  "gamerule.rbdMaxNamedSavePoints": "Return By Death - Max named save points per player",
+  "gamerule.rbdActionBarCooldown": "Return By Death - Show cooldown as action bar text"
 }

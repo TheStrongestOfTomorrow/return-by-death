@@ -2,29 +2,29 @@
   "format_version": 2,
   "header": {
     "name": "Return By Death - Behavior Pack",
-    "description": "Re:Zero-inspired Return By Death mechanic for Bedrock Edition (including Pocket Edition). Saves player state every 5 seconds. On death, rewinds to save point with the saved inventory and plays the iconic sound.",
+    "description": "Re:Zero-inspired Return By Death mechanic for Bedrock Edition (including Pocket Edition). v1.1.0: Configurable save interval, death counter, death log, particle beacon, named save points, configurable sound volume/pitch/broadcast radius, action bar cooldown. Saves player state every 5 seconds. On death, rewinds to save point with the saved inventory and plays the iconic sound.",
     "uuid": "f1a2c3d4-5b6e-4f7a-8b9c-0d1e2f3a4b5c",
-    "version": [1, 0, 0],
+    "version": [1, 1, 0],
     "min_engine_version": [1, 21, 0]
   },
   "modules": [
     {
       "type": "data",
       "uuid": "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
-      "version": [1, 0, 0]
+      "version": [1, 1, 0]
     },
     {
       "type": "script",
       "language": "javascript",
       "uuid": "b2c3d4e5-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
-      "version": [1, 0, 0],
+      "version": [1, 1, 0],
       "entry": "scripts/main.js"
     }
   ],
   "dependencies": [
     {
       "module_name": "@minecraft/server",
-      "version": "1.13.0"
+      "version": "1.14.0"
     },
     {
       "module_name": "@minecraft/server-ui",
@@ -32,12 +32,12 @@
     },
     {
       "uuid": "c3d4e5f6-7a8b-4c9d-0e1f-2a3b4c5d6e7f",
-      "version": [1, 0, 0]
+      "version": [1, 1, 0]
     }
   ],
   "metadata": {
     "authors": ["Return By Death Mod Team"],
     "license": "MIT",
-    "url": "https://github.com/rezero-mod/return-by-death"
+    "url": "https://github.com/TheStrongestOfTomorrow/return-by-death"
   }
 }

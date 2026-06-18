@@ -3,7 +3,6 @@ package com.rezero.rbd.mixins;
 import com.rezero.rbd.DeathHandler;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.world.GameRules;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -23,12 +22,9 @@ public abstract class ServerPlayerEntityMixin {
     @Inject(method = "onDeath", at = @At("HEAD"), cancellable = true)
     private void rbd$onDeath(DamageSource source, CallbackInfo ci) {
         ServerPlayerEntity self = (ServerPlayerEntity) (Object) this;
-        // Try to handle the death Return-By-Death style.
-        boolean handled = DeathHandler.onPlayerDeath(self);
+        boolean handled = DeathHandler.onPlayerDeath(self, source);
         if (handled) {
-            // Cancel the rest of onDeath() — no drops, no death message, no scoreboard updates.
             ci.cancel();
         }
-        // Otherwise, fall through to vanilla death handling.
     }
 }

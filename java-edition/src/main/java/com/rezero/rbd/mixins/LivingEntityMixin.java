@@ -21,8 +21,7 @@ public abstract class LivingEntityMixin {
     private void rbd$onLivingDeath(DamageSource source, CallbackInfo ci) {
         Object self = this;
         if (self instanceof ServerPlayerEntity player) {
-            // Defer to DeathHandler. If it handled the death, cancel the rest.
-            boolean handled = com.rezero.rbd.DeathHandler.onPlayerDeath(player);
+            boolean handled = com.rezero.rbd.DeathHandler.onPlayerDeath(player, source);
             if (handled) {
                 ci.cancel();
             }

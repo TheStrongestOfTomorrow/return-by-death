@@ -1,25 +1,26 @@
 package com.rezero.rbd;
 
 import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtList;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.world.World;
-import net.minecraft.world.dimension.DimensionType;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
 /**
  * SaveManager - the heart of the "Return By Death" mechanic.
  *
- * Every 5 seconds (configurable via SAVE_INTERVAL_TICKS), the player's state is captured:
+ * Every configurable number of seconds (gamerule rbdSaveIntervalSeconds, default 5),
+ * the player's state is captured:
  *   - Position (x, y, z, yaw, pitch)
  *   - Dimension (Overworld / Nether / End / modded dimensions)
  *   - Full inventory snapshot (main, armor, offhand)
@@ -28,49 +29,99 @@ import java.util.UUID;
  *   - Active potion effects
  *   - Fire / freeze / air ticks
  *
- * On death, DeathHandler restores the player from this snapshot, effectively "rewinding"
- * them to their last save point with everything they had at that moment.
+ * On death, DeathHandler restores the player from this snapshot.
+ *
+ * v1.1.0 also supports named save points — a player can create up to
+ * rbdMaxNamedSavePoints named saves (default 3). The auto-save remains
+ * the default return target.
  */
 public final class SaveManager {
 
-    /** Per-player save state. */
-    private static final Map<UUID, PlayerSave> SAVES = new HashMap<>();
+    /** Per-player auto save state. */
+    private static final Map<UUID, PlayerSave> AUTO_SAVES = new HashMap<>();
 
-    /** Last manual save time per player (millis), used for /rbd save. */
-    private static final Map<UUID, Long> LAST_MANUAL_SAVE = new HashMap<>();
+    /** Per-player named save states: UUID -> (name -> save). */
+    private static final Map<UUID, Map<String, PlayerSave>> NAMED_SAVES = new HashMap<>();
 
     private SaveManager() {}
 
-    /** Ensure a player has an entry in the save map (used on join). */
+    /** Ensure a player has an entry in the auto-save map (used on join). */
     public static void touch(ServerPlayerEntity player) {
-        SAVES.computeIfAbsent(player.getUuid(), k -> {
-            capture(player, false);
-            return null;
-        });
-        if (!SAVES.containsKey(player.getUuid())) {
+        if (!AUTO_SAVES.containsKey(player.getUuid())) {
             capture(player, false);
         }
     }
 
-    /** Called every 5 seconds to silently capture the player's state. */
+    /** Auto-save called periodically by the tick loop. */
     public static void autoSave(ServerPlayerEntity player) {
         capture(player, false);
     }
 
-    /** Called manually (via /rbd save) to capture state and notify the player. */
+    /** Manual save called via /rbd save. */
     public static void manualSave(ServerPlayerEntity player) {
-        capture(player, true);
-        LAST_MANUAL_SAVE.put(player.getUuid(), System.currentTimeMillis());
+        capture(player, false); // already announces via command
+    }
+
+    /** Create a named save point. Returns null on success, or an error message. */
+    public static String createNamedSave(ServerPlayerEntity player, String name) {
+        if (name == null || name.trim().isEmpty()) return "Name cannot be empty";
+        if (name.length() > 32) return "Name too long (max 32 chars)";
+        if (name.contains(" ")) return "Name cannot contain spaces";
+
+        Map<String, PlayerSave> map = NAMED_SAVES.computeIfAbsent(player.getUuid(), k -> new LinkedHashMap<>());
+        int max = RBDGameRules.maxNamedSavePoints(player.getServer());
+        if (!map.containsKey(name) && map.size() >= max) {
+            return "Maximum named save points reached (" + max + "). Delete one first.";
+        }
+        PlayerSave save = captureToSave(player);
+        map.put(name, save);
+        return null; // success
+    }
+
+    /** List a player's named save points. */
+    public static Map<String, PlayerSave> getNamedSaves(UUID uuid) {
+        return NAMED_SAVES.getOrDefault(uuid, new LinkedHashMap<>());
+    }
+
+    /** Delete a named save point. Returns true on success. */
+    public static boolean deleteNamedSave(UUID uuid, String name) {
+        Map<String, PlayerSave> map = NAMED_SAVES.get(uuid);
+        if (map == null) return false;
+        boolean removed = map.remove(name) != null;
+        return removed;
+    }
+
+    /** Restore the player from a named save point. */
+    public static boolean restoreNamed(ServerPlayerEntity player, String name) {
+        Map<String, PlayerSave> map = NAMED_SAVES.get(player.getUuid());
+        if (map == null) return false;
+        PlayerSave save = map.get(name);
+        if (save == null) return false;
+        restoreFromSave(player, save);
+        return true;
+    }
+
+    /** Clear the player's auto-save, making their next death permanent (permadeath mode). */
+    public static boolean resetAutoSave(UUID uuid) {
+        return AUTO_SAVES.remove(uuid) != null;
     }
 
     private static void capture(ServerPlayerEntity player, boolean announce) {
+        PlayerSave save = captureToSave(player);
+        AUTO_SAVES.put(player.getUuid(), save);
+
+        if (announce && ReturnByDeathMod.DEBUG) {
+            ReturnByDeathMod.LOGGER.info("[RBD] Save for {} at {},{},{} in {}",
+                    player.getName().getString(), save.x, save.y, save.z, save.worldKey.getValue());
+        }
+    }
+
+    private static PlayerSave captureToSave(ServerPlayerEntity player) {
         PlayerSave save = new PlayerSave();
         save.uuid = player.getUuid();
         save.worldKey = player.getWorld().getRegistryKey();
         Vec3d pos = player.getPos();
-        save.x = pos.x;
-        save.y = pos.y;
-        save.z = pos.z;
+        save.x = pos.x; save.y = pos.y; save.z = pos.z;
         save.yaw = player.getYaw();
         save.pitch = player.getPitch();
 
@@ -95,15 +146,12 @@ public final class SaveManager {
         save.xpProgress = player.experienceProgress;
         save.totalXp = player.totalExperience;
 
-        // Effects (encoded as NBT list)
-        NbtCompound effectsNbt = new NbtCompound();
-        player.getStatusEffects().forEach(e -> {
-            // Let the entity write them; we use a tag built per-effect
-        });
+        // Effects (serialized as Identifier strings — works on both 1.20 and 1.21)
         save.effectsNbt = new NbtList();
         for (var effect : player.getActiveStatusEffects().values()) {
             NbtCompound ec = new NbtCompound();
-            ec.putInt("Id", net.minecraft.entity.effect.StatusEffect.getRawId(effect.getEffectType()));
+            Identifier id = Registries.STATUS_EFFECT.getId(effect.getEffectType());
+            ec.putString("Id", id != null ? id.toString() : "minecraft:unluck");
             ec.putInt("Amplifier", effect.getAmplifier());
             ec.putInt("Duration", effect.getDuration());
             ec.putBoolean("Ambient", effect.isAmbient());
@@ -112,36 +160,25 @@ public final class SaveManager {
             save.effectsNbt.add(ec);
         }
 
-        // Ender chest is intentionally NOT saved — Return By Death only rewinds the player.
-
-        SAVES.put(player.getUuid(), save);
-
-        if (announce && ReturnByDeathMod.DEBUG) {
-            ReturnByDeathMod.LOGGER.info("[RBD] Manual save for {} at {},{},{} in {}",
-                    player.getName().getString(), save.x, save.y, save.z, save.worldKey.getValue());
-        }
+        return save;
     }
 
-    /** Returns true if a save point exists for this player. */
     public static boolean hasSave(UUID uuid) {
-        return SAVES.containsKey(uuid);
+        return AUTO_SAVES.containsKey(uuid);
     }
 
-    /** Returns the save point for a player (or null). */
     public static PlayerSave getSave(UUID uuid) {
-        return SAVES.get(uuid);
+        return AUTO_SAVES.get(uuid);
     }
 
-    /**
-     * Restore the player's state from their save point.
-     * Returns true on success, false if no save exists.
-     */
     public static boolean restore(ServerPlayerEntity player) {
-        PlayerSave save = SAVES.get(player.getUuid());
-        if (save == null) {
-            return false;
-        }
+        PlayerSave save = AUTO_SAVES.get(player.getUuid());
+        if (save == null) return false;
+        restoreFromSave(player, save);
+        return true;
+    }
 
+    private static void restoreFromSave(ServerPlayerEntity player, PlayerSave save) {
         // Restore inventory
         PlayerInventory inv = player.getInventory();
         inv.main.clear();
@@ -170,17 +207,20 @@ public final class SaveManager {
         if (save.effectsNbt != null) {
             for (int i = 0; i < save.effectsNbt.size(); i++) {
                 NbtCompound ec = save.effectsNbt.getCompound(i);
-                int id = ec.getInt("Id");
-                int amp = ec.getInt("Amplifier");
-                int dur = ec.getInt("Duration");
-                boolean ambient = ec.getBoolean("Ambient");
-                boolean particles = ec.getBoolean("ShowParticles");
-                boolean icon = ec.getBoolean("ShowIcon");
-                var type = net.minecraft.entity.effect.StatusEffect.byRawId(id);
-                if (type != null) {
-                    player.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(
-                            type, dur, amp, ambient, particles, icon));
-                }
+                String idStr = ec.getString("Id");
+                Identifier id;
+                try { id = new Identifier(idStr); }
+                catch (Exception ignored) { continue; }
+                var type = Registries.STATUS_EFFECT.get(id);
+                if (type == null) continue;
+                player.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(
+                        type,
+                        ec.getInt("Duration"),
+                        ec.getInt("Amplifier"),
+                        ec.getBoolean("Ambient"),
+                        ec.getBoolean("ShowParticles"),
+                        ec.getBoolean("ShowIcon")
+                ));
             }
         }
 
@@ -188,7 +228,7 @@ public final class SaveManager {
         player.experienceLevel = save.xpLevel;
         player.experienceProgress = save.xpProgress;
         player.totalExperience = save.totalXp;
-        player.addExperienceLevels(0); // refresh XP bar
+        player.addExperienceLevels(0);
 
         // Teleport back to save point
         var server = player.getServer();
@@ -206,8 +246,6 @@ public final class SaveManager {
             player.setVelocity(0, 0, 0);
             player.velocityModified = true;
         }
-
-        return true;
     }
 
     private static ItemStack[] copyInventoryItems(net.minecraft.util.collection.DefaultedList<ItemStack> list) {
@@ -218,7 +256,6 @@ public final class SaveManager {
         return arr;
     }
 
-    /** Snapshot of a player's state at a save point. */
     public static class PlayerSave {
         public UUID uuid;
         public RegistryKey<World> worldKey;

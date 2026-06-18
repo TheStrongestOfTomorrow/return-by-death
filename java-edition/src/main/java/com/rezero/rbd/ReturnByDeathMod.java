@@ -14,16 +14,24 @@ import org.slf4j.LoggerFactory;
 /**
  * Return By Death - A Re:Zero-inspired mod.
  *
- * When a player dies, they are rewound to their last save point (recorded every 5 seconds)
- * with the inventory they had at that moment, and the iconic Return By Death sound plays.
+ * v1.1.0:
+ *   - Configurable save interval (gamerule rbdSaveIntervalSeconds)
+ *   - Death counter ("loops") persisted across restarts via RBDState
+ *   - Death log (last 10 deaths with timestamp, dimension, coords, cause)
+ *   - Save point particle beacon (visible to owner)
+ *   - Named save points (max 3 by default, configurable)
+ *   - Configurable sound volume / pitch / broadcast radius
+ *   - Action bar cooldown display
+ *   - Reset command (permadeath mode)
  *
- * Inspired by Subaru Natsuki's ability from Re:Zero.
+ * v1.0.0:
+ *   - Core mechanic: auto-save every 5s, death rewind, sound trigger
  */
 public class ReturnByDeathMod implements ModInitializer {
     public static final String MOD_ID = "rbd";
     public static final Logger LOGGER = LoggerFactory.getLogger("Return By Death");
 
-    /** Save interval in ticks (5 seconds = 100 ticks). */
+    /** Legacy constant — kept for compatibility. Actual interval is now configurable. */
     public static final int SAVE_INTERVAL_TICKS = 100;
 
     /** Sound identifier for the Return By Death trigger. */
@@ -34,8 +42,7 @@ public class ReturnByDeathMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("[Return By Death] Initializing - 'I will save you, no matter how many times I have to die.'");
-        LOGGER.info("[Return By Death] Save interval: {} ticks (5 seconds)", SAVE_INTERVAL_TICKS);
+        LOGGER.info("[Return By Death v1.1.0] Initializing - 'I will save you, no matter how many times I have to die.'");
 
         // Register custom gamerules
         RBDGameRules.register();
@@ -43,31 +50,41 @@ public class ReturnByDeathMod implements ModInitializer {
         // Hook the per-tick save logic
         ServerTickEvents.END_SERVER_TICK.register(this::onServerTick);
 
-        // Greet players on join and ensure instant respawn is enabled
+        // Greet players on join
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             ServerPlayerEntity player = handler.getPlayer();
             ensureInstantRespawn(server);
             SaveManager.touch(player);
-            player.sendMessage(Text.literal("\u00a7d\u00a7l[Return By Death] \u00a7r\u00a77A save point will be created every 5 seconds. Die, and rewind."), false);
+            int interval = RBDGameRules.saveIntervalSeconds(server);
+            player.sendMessage(Text.literal("\u00a7d\u00a7l[Return By Death v1.1.0] \u00a7r\u00a77A save point is created every \u00a7e" + interval + "s\u00a77. Die, and rewind."), false);
+            player.sendMessage(Text.literal("\u00a77  Type \u00a7e/rbd help\u00a77 for commands. Particles mark your save point."), false);
         });
 
         // Register commands
         RBDCommands.register();
 
-        LOGGER.info("[Return By Death] Initialization complete. May the Witch of Envy have mercy.");
+        LOGGER.info("[Return By Death v1.1.0] Initialization complete. May the Witch of Envy have mercy.");
     }
 
     private void onServerTick(MinecraftServer server) {
-        // Auto-enable instant respawn if disabled
         ensureInstantRespawn(server);
 
+        int intervalSeconds = RBDGameRules.saveIntervalSeconds(server);
+        int intervalTicks = intervalSeconds * 20;
+        if (intervalTicks < 20) intervalTicks = 20; // sanity floor
+
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-            // Periodically save the player's state (every 5 seconds)
-            if (player.age > 0 && player.age % SAVE_INTERVAL_TICKS == 0) {
+            // Auto-save on the configured interval
+            if (player.age > 0 && player.age % intervalTicks == 0) {
                 SaveManager.autoSave(player);
             }
-            // Drive the death cooldown timer
+            // Per-player tick (cooldown action bar)
             DeathHandler.tick(player);
+        }
+
+        // Particle beacon - tick once per second (every 20 ticks)
+        if (server.getTicks() % 20 == 0) {
+            SavePointBeacon.tick(server);
         }
     }
 
