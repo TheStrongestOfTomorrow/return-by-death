@@ -44,7 +44,7 @@ public class ReturnByDeathMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("[Return By Death v1.2.3] Initializing - 'I will save you, no matter how many times I have to die.'");
+        LOGGER.info("[Return By Death v1.2.4] Initializing - 'I will save you, no matter how many times I have to die.'");
 
         // Register custom gamerules
         RBDGameRules.register();
@@ -58,14 +58,14 @@ public class ReturnByDeathMod implements ModInitializer {
             ensureInstantRespawn(server);
             SaveManager.touch(player);
             int interval = RBDGameRules.saveIntervalSeconds(server);
-            player.sendMessage(Text.literal("\u00a7d\u00a7l[Return By Death v1.2.3] \u00a7r\u00a77A save point is created every \u00a7e" + interval + "s\u00a77. Die, and rewind."), false);
+            player.sendMessage(Text.literal("\u00a7d\u00a7l[Return By Death v1.2.4] \u00a7r\u00a77A save point is created every \u00a7e" + interval + "s\u00a77. Die, and rewind."), false);
             player.sendMessage(Text.literal("\u00a77  Type \u00a7e/rbd help\u00a77 for commands. Particles mark your save point."), false);
         });
 
         // Register commands
         RBDCommands.register();
 
-        LOGGER.info("[Return By Death v1.2.3] Initialization complete. May the Witch of Envy have mercy.");
+        LOGGER.info("[Return By Death v1.2.4] Initialization complete. May the Witch of Envy have mercy.");
     }
 
     private void onServerTick(MinecraftServer server) {

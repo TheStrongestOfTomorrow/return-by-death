@@ -1,10 +1,10 @@
 /**
- * Return By Death - Bedrock Edition (incl. Pocket Edition) - v1.2.3 HOTFIX
+ * Return By Death - Bedrock Edition (incl. Pocket Edition) - v1.2.4 HOTFIX
  * =======================================================================
  *
  * Inspired by Subaru Natsuki's ability from Re:Zero.
  *
- * v1.2.3 HOTFIX: Fixed two critical bugs reported by users:
+ * v1.2.4 HOTFIX: Fixed two critical bugs reported by users:
  *   1. "RBD not working after first save" - caused by save.health being 0 (race condition
  *      during death), which made the player instantly re-die after restore. Now clamps
  *      health to min 1 and hunger to min 6.
@@ -251,7 +251,7 @@ function captureSave(player) {
 function restoreSave(player, save) {
   log("restoreSave: starting for player", player.name);
 
-  // === v1.2.3 BUGFIX: Health safety check ===
+  // === v1.2.4 BUGFIX: Health safety check ===
   // If save.health is 0 or negative (race condition: save was taken at moment of death),
   // the player would instantly re-die after restore. Fall back to max health.
   let safeHealth = save.health;
@@ -267,7 +267,7 @@ function restoreSave(player, save) {
   }
 
   // === TELEPORT (attempt 1 of 2) ===
-  // v1.2.3 BUGFIX: Teleport can fail silently if called too soon after respawn.
+  // v1.2.4 BUGFIX: Teleport can fail silently if called too soon after respawn.
   // We teleport twice - once immediately, once after a delay - to ensure it sticks.
   try {
     const targetDim = world.getDimension(save.dimensionId);
@@ -374,7 +374,7 @@ function restoreSave(player, save) {
 }
 
 /**
- * v1.2.3: Re-teleports the player to the save point after a delay.
+ * v1.2.4: Re-teleports the player to the save point after a delay.
  * This is called separately from restoreSave because Bedrock's respawn logic
  * can override the first teleport. The second teleport (after 10 ticks) ensures
  * the player actually ends up at the save point.
@@ -396,35 +396,34 @@ function reTeleportToSave(player, save) {
 }
 
 function playReturnByDeathSound(deathLoc, deathDimId) {
-  const volume = Math.max(0, Math.min(1, CONFIG.soundVolume / 100));
+  // v1.2.4: Removed the Math.min(1, ...) clamp. Bedrock allows volume > 1.0 in playSound,
+  // which increases the audible RANGE (not just loudness). With our sound_definitions.json
+  // setting volume: 4.0 + max_distance: 10000, the sound will be loud and audible server-wide.
+  const volume = Math.max(0, CONFIG.soundVolume / 100) * 4.0; // up to 4.0
   const pitch = Math.max(0.5, Math.min(2, CONFIG.soundPitch / 100));
   if (volume <= 0) return;
 
-  if (CONFIG.broadcastRadius < 0) {
-    for (const p of world.getAllPlayers()) {
-      try { p.playSound(SAVE_SOUND_ID, { volume, pitch }); } catch (_) {}
-    }
-  } else {
-    const r = CONFIG.broadcastRadius;
-    try {
-      const dim = world.getDimension(deathDimId);
-      dim.playSound(SAVE_SOUND_ID, deathLoc, { volume, pitch });
-    } catch (e) {
-      log("dimension.playSound failed, falling back to per-player:", e);
-      for (const p of world.getAllPlayers()) {
-        try {
-          if (p.dimension.id !== deathDimId) continue;
-          const dx = p.location.x - deathLoc.x;
-          const dy = p.location.y - deathLoc.y;
-          const dz = p.location.z - deathLoc.z;
-          const d = Math.sqrt(dx*dx + dy*dy + dz*dz);
-          if (d <= r) {
-            const distVol = Math.max(0.05, volume * (1 - d / Math.max(1, r)));
-            p.playSound(SAVE_SOUND_ID, { volume: distVol, pitch });
-          }
-        } catch (_) {}
-      }
-    }
+  // Play to ALL players globally - the sound is now configured to be loud enough
+  // to be heard anywhere in the same dimension.
+  for (const p of world.getAllPlayers()) {
+    try { p.playSound(SAVE_SOUND_ID, { volume, pitch }); } catch (_) {}
+  }
+  log("playReturnByDeathSound: played to", world.getAllPlayers().length, "players (vol=" + volume + ", pitch=" + pitch + ")");
+}
+
+/**
+ * v1.2.4: Plays the RBD sound directly to a specific player (used on respawn,
+ * since the dying player can't hear sounds during the death screen).
+ */
+function playReturnByDeathSoundToPlayer(player) {
+  const volume = Math.max(0, CONFIG.soundVolume / 100) * 4.0;
+  const pitch = Math.max(0.5, Math.min(2, CONFIG.soundPitch / 100));
+  if (volume <= 0) return;
+  try {
+    player.playSound(SAVE_SOUND_ID, { volume, pitch });
+    log("playReturnByDeathSoundToPlayer: played to", player.name);
+  } catch (e) {
+    log("playReturnByDeathSoundToPlayer failed:", e);
   }
 }
 
@@ -827,7 +826,7 @@ world.afterEvents.playerDie.subscribe((ev) => {
 });
 
 // On respawn - restore state
-// v1.2.3 BUGFIX: Use double-teleport with delays to fix "spawning outside save point".
+// v1.2.4 BUGFIX: Use double-teleport with delays to fix "spawning outside save point".
 //   The first teleport (in restoreSave) can be overridden by Bedrock's respawn logic.
 //   The second teleport (after 10 ticks) confirms the position sticks.
 world.afterEvents.playerSpawn.subscribe((ev) => {
@@ -863,6 +862,9 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
     try {
       log("onRespawn: running restoreSave (attempt 1)");
       restoreSave(player, save);
+      // v1.2.4: Play the RBD sound to the respawned player.
+      // The dying player can't hear sounds during the death screen, so we replay it here.
+      playReturnByDeathSoundToPlayer(player);
       announce(player, `\u00a7aReturned to your save point at \u00a77${Math.floor(save.x)}, ${Math.floor(save.y)}, ${Math.floor(save.z)}\u00a7a in \u00a7b${save.dimensionId.replace("minecraft:", "")}\u00a7a.`);
     } catch (e) {
       log("onRespawn: restoreSave attempt 1 FAILED:", e);
@@ -871,7 +873,7 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
   }, 5);
 
   // SECOND teleport: after 10 more ticks (15 total) to confirm position sticks
-  // v1.2.3: This is the KEY fix for "spawning outside save point"
+  // v1.2.4: This is the KEY fix for "spawning outside save point"
   system.runTimeout(() => {
     try {
       if (player && player.isValid()) {
@@ -1228,7 +1230,7 @@ function handleCommand(player, sub, parts) {
       break;
     }
     case "status": {
-      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.3 Status ===");
+      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.4 Status ===");
       announce(player, `\u00a7aEnabled: \u00a77${CONFIG.enabled}`);
       announce(player, `\u00a7aSave interval (sec): \u00a77${CONFIG.saveIntervalSeconds}`);
       announce(player, `\u00a7aCooldown (sec): \u00a77${CONFIG.cooldownSeconds}`);
@@ -1296,9 +1298,12 @@ function handleCommand(player, sub, parts) {
     }
     case "testsound": {
       try {
-        player.playSound(SAVE_SOUND_ID, { volume: CONFIG.soundVolume / 100, pitch: CONFIG.soundPitch / 100 });
-        announce(player, `\u00a7aPlaying Return By Death sound (vol=${CONFIG.soundVolume}%, pitch=${CONFIG.soundPitch}%).`);
-        announce(player, "\u00a77  If you don't hear it: (1) ensure the resource pack is active, (2) restart MC client completely, (3) reinstall both packs.");
+        // v1.2.4: Use the boosted volume formula (up to 4.0)
+        const vol = Math.max(0, CONFIG.soundVolume / 100) * 4.0;
+        const pitch = Math.max(0.5, Math.min(2, CONFIG.soundPitch / 100));
+        player.playSound(SAVE_SOUND_ID, { volume: vol, pitch });
+        announce(player, `\u00a7aPlaying Return By Death sound (vol=${CONFIG.soundVolume}%, effective=${vol.toFixed(1)}x, pitch=${CONFIG.soundPitch}%).`);
+        announce(player, "\u00a77  If you don't hear it: (1) ensure the resource pack is active, (2) FULLY RESTART MC client (not just reload world), (3) reinstall both packs.");
       } catch (e) {
         announce(player, "\u00a7cFailed to play sound: " + e);
       }
@@ -1367,7 +1372,7 @@ function handleCommand(player, sub, parts) {
       break;
     }
     case "debug": {
-      announce(player, "\u00a7d\u00a7l=== RBD v1.2.3 Command Layers ===");
+      announce(player, "\u00a7d\u00a7l=== RBD v1.2.4 Command Layers ===");
       announce(player, `\u00a7aLayer 1 - CustomCommandRegistry (/rbd:*): \u00a77${LAYERS.customCommand ? "\u00a7aACTIVE" : "\u00a7cINACTIVE (need Bedrock 1.21.80+)"}`);
       announce(player, `\u00a7aLayer 2 - chatSend (!rbd chat): \u00a77${LAYERS.chatSend ? "\u00a7aACTIVE" : "\u00a7cINACTIVE (may need Beta APIs toggle)"}`);
       announce(player, `\u00a7aLayer 3 - RBD Notebook item UI: \u00a77${LAYERS.itemUI ? "\u00a7aACTIVE" : "\u00a7cINACTIVE"}`);
@@ -1376,7 +1381,7 @@ function handleCommand(player, sub, parts) {
       break;
     }
     case "debug_save": {
-      // v1.2.3: Debug the current save state
+      // v1.2.4: Debug the current save state
       const s = saves.get(player.id);
       if (!s) {
         announce(player, "\u00a7cNo save point in memory. Auto-save runs every " + CONFIG.saveIntervalSeconds + "s.");
@@ -1402,7 +1407,7 @@ function handleCommand(player, sub, parts) {
       break;
     }
     case "forcerestore": {
-      // v1.2.3: Manually trigger a restore from the save point
+      // v1.2.4: Manually trigger a restore from the save point
       const s = saves.get(player.id);
       if (!s) {
         announce(player, "\u00a7cNo save point exists. Use !rbd save first.");
@@ -1424,7 +1429,7 @@ function handleCommand(player, sub, parts) {
     }
     case "help":
     default: {
-      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.3 Help ===");
+      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.4 Help ===");
       announce(player, "\u00a76Three ways to run commands:");
       announce(player, "\u00a7a  1. Slash commands: \u00a77/rbd:save, /rbd:info, etc. (Bedrock 1.21.80+)");
       announce(player, "\u00a7a  2. Chat commands: \u00a77!rbd save, !rbd info, etc. (older Bedrock)");
@@ -1432,8 +1437,8 @@ function handleCommand(player, sub, parts) {
       announce(player, "\u00a76Player commands:");
       announce(player, "\u00a7a  save, info, status, loops, looplog, lastdeath");
       announce(player, "\u00a7a  revert, testsound, reset, particles, debug");
-      announce(player, "\u00a7a  forcerestore \u00a77- manually teleport to save point (v1.2.3)");
-      announce(player, "\u00a7a  debug_save \u00a77- show save point details + distance (v1.2.3)");
+      announce(player, "\u00a7a  forcerestore \u00a77- manually teleport to save point (v1.2.4)");
+      announce(player, "\u00a7a  debug_save \u00a77- show save point details + distance (v1.2.4)");
       announce(player, "\u00a7a  named <name> | named list | named delete <name>");
       announce(player, "\u00a76Op commands:");
       announce(player, "\u00a7a  interval <sec>, cooldown <sec>, broadcast <on|off>");
@@ -1520,7 +1525,7 @@ function pad(n) { return n < 10 ? "0" + n : String(n); }
 
 // ============================ Init Log ============================
 
-log("Return By Death v1.2.3 (Bedrock Edition) loaded.");
+log("Return By Death v1.2.4 (Bedrock Edition) loaded.");
 log(`Save interval: ${CONFIG.saveIntervalSeconds}s. Inspired by Subaru Natsuki from Re:Zero.`);
 log("Sound is in resource_pack_RBD (NOT behavior pack).");
 log("Command layers - Layer 1 (CustomCommandRegistry): " + (LAYERS.customCommand ? "ACTIVE" : "inactive"));
