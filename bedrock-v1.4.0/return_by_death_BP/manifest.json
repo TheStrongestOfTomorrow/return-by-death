@@ -1,0 +1,43 @@
+{
+  "format_version": 2,
+  "metadata": {
+    "authors": ["Return By Death Mod Team"],
+    "license": "MIT",
+    "url": "https://github.com/TheStrongestOfTomorrow/return-by-death"
+  },
+  "header": {
+    "name": "Return By Death - BP",
+    "description": "Return By Death v1.4.0 - Re:Zero-inspired death rewind. Restoration release: merges the proven v1.3.0 death-detection foundation (entityDie event + polling fallback + GLOBAL_REWIND_ACTIVE mutex + auto-gamerule setup) with the complete v1.2.5 feature set (save/restore, particle beacon ring, witch scent, heartbeat, death quotes, broadcastRadius, all 3 command layers).",
+    "uuid": "f1a2c3d4-5b6e-4f7a-8b9c-0d1e2f3a4b5c",
+    "version": [1, 4, 0],
+    "min_engine_version": [1, 21, 50]
+  },
+  "modules": [
+    {
+      "type": "data",
+      "uuid": "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "version": [1, 4, 0]
+    },
+    {
+      "type": "script",
+      "language": "javascript",
+      "uuid": "b2c3d4e5-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+      "version": [1, 4, 0],
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "1.19.0"
+    },
+    {
+      "module_name": "@minecraft/server-ui",
+      "version": "1.3.0"
+    },
+    {
+      "uuid": "c3d4e5f6-7a8b-4c9d-0e1f-2a3b4c5d6e7f",
+      "version": [1, 4, 0]
+    }
+  ]
+}

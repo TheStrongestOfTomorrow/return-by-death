@@ -7,11 +7,24 @@ A Minecraft mod inspired by **Subaru Natsuki's "Return By Death"** ability from 
 
 **Available for both Minecraft Java Edition (Fabric) and Minecraft Bedrock Edition (incl. Pocket Edition).**
 
-**Current version: v1.2.3** — see [What's New](#whats-new-in-v123) below.
+**Current version: v1.4.0** (Bedrock restoration release) — see [What's New](#whats-new-in-v140) below, or read the full [CHANGELOG.md](./CHANGELOG.md).
+
+---
+
+## What's New in v1.4.0 (Restoration Release)
+
+**v1.4.0 brings back the complete v1.2.5 feature set on top of the proven v1.3.0 death-detection foundation.** After v1.3.1 stripped everything down to just "play sound on death", this release merges every feature back together:
+
+- **Proven v1.3.0 foundation kept**: `entityDie` event + 1-tick polling fallback for reliable death detection, `GLOBAL_REWIND_ACTIVE` mutex to prevent double-restore, automatic gamerule setup (`doimmediaterespawn`, `keepinventory`, `showdeathmessages`), modern `EntityComponentTypes.*` constants, offhand equipment saved/restored, `player.getTotalExperience()` for accurate XP restore.
+- **v1.2.5 features restored**: `broadcastRadius` config + `/rbd radius` command, full particle beacon ring (4-direction `basic_crit_particle` ring around the save point), death cause extraction from `entityDie` event (was hardcoded `"unknown"` in v1.3.0), sound volume + pitch now applied to `playSound` (was hardcoded `1.0` in v1.3.0), witch scent drift particles, heartbeat volume scaling, action bar cooldown display, all `status` command fields.
+- **3 command layers all working**: Layer 1 (`/rbd:*` slash commands on Bedrock 1.21.80+), Layer 2 (`!rbd` chat commands on older Bedrock), Layer 3 (RBD Notebook item UI — universal fallback for console/mobile).
+
+**Install**: download `return_by_death_v1.4.0.mcaddon` from the [latest release](https://github.com/TheStrongestOfTomorrow/return-by-death/releases/latest) and double-click to import. The `.mcaddon` contains both the behavior pack and the resource pack with correct manifests.
 
 ---
 
 ## What's New in v1.2.3 (HOTFIX)
+
 
 Fixes two critical bugs reported by users after v1.2.2:
 
