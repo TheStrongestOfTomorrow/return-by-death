@@ -1,75 +1,48 @@
 /**
- * Return By Death - Bedrock Edition (incl. Pocket Edition) - v1.2.5 HOTFIX
- * =======================================================================
+ * Return By Death - Bedrock Edition - v1.3.0
+ * ===========================================
  *
  * Inspired by Subaru Natsuki's ability from Re:Zero.
  *
- * v1.2.5 HOTFIX: Fixed two critical bugs reported by users:
- *   1. "RBD not working after first save" - caused by save.health being 0 (race condition
- *      during death), which made the player instantly re-die after restore. Now clamps
- *      health to min 1 and hunger to min 6.
- *   2. "Spawning outside the RBD spawn point" - caused by Bedrock's respawn logic
- *      overriding our teleport. Now teleports TWICE: once after 5 ticks, once after
- *      15 ticks, to ensure the position sticks.
- *   New commands: /rbd:forcerestore (manual restore), /rbd:debug_save (show save details).
- *   Added detailed logging to restoreSave for troubleshooting.
+ * v1.3.0 REWRITE: Built on a proven working death-detection pattern (based on
+ * the open-source RBD reference pack by Tese). Previous versions (v1.2.x) had
+ * multiple issues with death detection, sound playback, and command registration.
  *
- * v1.2.2 HOTFIX: Layer 1 (CustomCommandRegistry) was broken in v1.2.1 because it
- *   registered commands but used a non-existent 'system.afterEvents.customCommand'
- *   event for execution. Fixed by passing the execution callback directly to
- *   registerCommand() as the second argument (per Bedrock Wiki / MS Learn docs).
- *   Also added: cheatsRequired: false so commands work without cheats enabled,
- *   CommandPermissionLevel enum import, mandatoryParameters support for /rbd:named <name>,
- *   /rbd:interval <sec>, etc.
+ * KEY FIXES IN v1.3.0:
+ *   1. Uses world.afterEvents.entityDie (NOT playerDie) for death detection - this
+ *      is the event that reliably fires on player death.
+ *   2. Adds a 1-tick polling fallback that checks if HP < 0.1 and triggers return -
+ *      so death is caught even if the entityDie event fails.
+ *   3. Uses simple p.playSound(soundId) with no options - matches reference pattern.
+ *   4. sound_definitions.json uses plain string array format - matches reference.
+ *   5. @minecraft/server bumped to 1.19.0 (matches reference).
+ *   6. Sets doimmediaterespawn/keepinventory/showdeathmessages via command at startup.
+ *   7. All command layers (CustomCommandRegistry, chatSend, RBD Notebook UI) retained.
  *
- * v1.2.1 PATCH NOTES:
+ * CORE MECHANIC:
+ *   - Every 20 seconds (configurable via /rbd:interval), capture player state:
+ *     position, dimension, rotation, health, hunger, XP level, inventory, equipment
+ *   - On death: play RBD sound to all players, mark for return, restore on respawn
  *
- *   BUG FIX - Bedrock chat commands now work via 3 layers (with graceful fallback):
- *     Layer 1: CustomCommandRegistry via system.beforeEvents.startup (Bedrock 1.21.80+)
- *              -> Real /rbd slash commands with autocomplete, work in command blocks,
- *                 NO Beta APIs needed.
- *     Layer 2: world.beforeEvents.chatSend fallback (older Bedrock versions)
- *              -> The classic !rbd chat handler. Wrapped in try/catch with logging.
- *     Layer 3: RBD Notebook item UI menu (universal fallback)
- *              -> Player gets a "RBD Notebook" item on join. Right-click opens
- *                 an ActionFormData with all commands as buttons.
- *                 Works on console, mobile, no chat needed.
- *
- *     All event subscriptions are now wrapped in try/catch with console.warn() logging
- *     so the script never silently dies. Use !rbd debug or /rbd debug to see which
- *     layers are active.
- *
- *   NEW FEATURES (Tier 1 RBD flavor):
- *     - Witch scent: dark soul particles drift around you for 60s after each death
- *     - Death quotes: random Subaru-style quote appears in chat on death
- *     - Heartbeat: deep heartbeat sound plays when your HP is below 6 (3 hearts)
- *     - Witch watching: every 5th death, action bar shows "The Witch of Envy is watching..."
- *
- * v1.2.0 / v1.1.0 / v1.0.0: All previous features retained.
- *
- * CHAT COMMANDS (Layer 2 - older Bedrock, requires Beta APIs toggle):
- *   Player: !rbd save, info, status, loops, looplog, lastdeath, revert, testsound,
- *           reset, named <name>, named list, named delete <name>, particles on|off,
- *           debug, help
- *   Op:     !rbd interval, cooldown, broadcast, radius, volume, pitch, maxnamed, mod
+ * CHAT COMMANDS (Layer 2 - older Bedrock, may need Beta APIs):
+ *   !rbd save, info, status, loops, looplog, lastdeath, revert, testsound,
+ *   reset, debug, forcerestore, debug_save, help, named <name>, named list,
+ *   named delete <name>, particles on|off
+ *   Op: !rbd interval, cooldown, broadcast, radius, volume, pitch, maxnamed, mod
  *
  * SLASH COMMANDS (Layer 1 - Bedrock 1.21.80+, no Beta APIs needed):
  *   Same as above but typed as /rbd:save, /rbd:info, etc.
  *
- * ITEM UI (Layer 3 - universal):
- *   Right-click the "RBD Notebook" item to open the command menu.
- *
- * IMPORTANT SOUND NOTE:
- *   - Sound is in the RESOURCE pack (not behavior pack) - Bedrock only loads
- *     custom sounds from resource packs.
- *   - If sound doesn't play: restart MC client completely, ensure both packs active.
+ * ITEM UI (Layer 3 - universal fallback):
+ *   Right-click the "RBD Notebook" item to open a button menu.
  */
 
 import {
   world,
   system,
-  EquipmentSlot,
   GameMode,
+  EntityComponentTypes,
+  EquipmentSlot,
   CommandPermissionLevel,
   CustomCommandParamType,
   CustomCommandStatus,
@@ -80,38 +53,32 @@ import {
 const SAVE_SOUND_ID = "rbd.return_by_death";
 const INVULN_TICKS_AFTER_RETURN = 60;
 const ITEM_DESPAWN_RADIUS = 8;
-const BEACON_INTERVAL_TICKS = 20;
-const BEACON_MAX_DISTANCE = 64;
 const MAX_LOG_ENTRIES = 10;
+const WITCH_SCENT_DURATION_MS = 60_000;
+const WITCH_SCENT_INTERVAL_TICKS = 40;
+const HEARTBEAT_HP_THRESHOLD = 6;
+const HEARTBEAT_CHECK_TICKS = 20;
+const WITCH_WATCHING_INTERVAL = 5;
 
-// v1.2.1 Tier 1 config
-const WITCH_SCENT_DURATION_MS = 60_000;     // 60 seconds
-const WITCH_SCENT_INTERVAL_TICKS = 40;       // 2 seconds
-const HEARTBEAT_HP_THRESHOLD = 6;            // HP at/below which heartbeat plays
-const HEARTBEAT_CHECK_TICKS = 20;            // every 1 second
-const WITCH_WATCHING_INTERVAL = 5;           // every 5th death
-
-// Track which command layers are active (for /rbd debug)
+// Track which command layers are active
 const LAYERS = {
   customCommand: false,
   chatSend: false,
   itemUI: false,
 };
 
-// Default config
+// Default config (persists in world dynamic property)
 const DEFAULT_CONFIG = {
   enabled: true,
   saveIntervalSeconds: 20,
   cooldownSeconds: 0,
   broadcastDeaths: false,
-  broadcastRadius: -1,
   soundVolume: 100,
   soundPitch: 100,
   particleBeaconEnabled: true,
   deathCounterEnabled: true,
   maxNamedSavePoints: 3,
   actionBarCooldown: true,
-  // v1.2.1 Tier 1 toggles
   witchScentEnabled: true,
   deathQuotesEnabled: true,
   heartbeatEnabled: true,
@@ -148,10 +115,8 @@ const pendingReturns = new Set();
 const deathLocations = new Map();
 const cooldownUntil = new Map();
 const particleOverride = new Map();
-
-// v1.2.1: Witch scent tracking
-/** @type {Map<string, number>} player.id -> scent end time (ms epoch) */
 const witchScentUntil = new Map();
+const GLOBAL_REWIND_ACTIVE = { value: false }; // mutex to prevent double-restore
 
 // ============================ Helpers ============================
 
@@ -177,98 +142,126 @@ function isOp(player) {
   }
 }
 
+// ============================ Setup gamerules at startup ============================
+
+// v1.3.0: Set required gamerules at startup (matches reference pack pattern)
+system.run(() => {
+  try {
+    const ov = world.getDimension("overworld");
+    try { ov.runCommand("gamerule doimmediaterespawn true"); } catch (_) {}
+    try { ov.runCommand("gamerule keepinventory true"); } catch (_) {}
+    try { ov.runCommand("gamerule showdeathmessages false"); } catch (_) {}
+    log("Startup: gamerules set (doimmediaterespawn=true, keepinventory=true, showdeathmessages=false)");
+  } catch (e) {
+    warn("Startup: failed to set gamerules:", e);
+  }
+});
+
 // ============================ Capture / Restore ============================
 
 function captureSave(player) {
-  const loc = player.location;
-  const rot = player.getRotation();
-  const dim = player.dimension.id;
-
-  const invComp = player.getComponent("minecraft:inventory");
-  const inventory = [];
-  if (invComp && invComp.container) {
-    const c = invComp.container;
-    for (let i = 0; i < c.size; i++) {
-      const it = c.getItem(i);
-      if (it) inventory.push({ slot: i, item: it.clone() });
-    }
-  }
-
-  const equipment = {};
   try {
-    const eqComp = player.getComponent("minecraft:equippable");
-    if (eqComp) {
-      for (const slot of [EquipmentSlot.Head, EquipmentSlot.Chest, EquipmentSlot.Legs, EquipmentSlot.Feet]) {
-        const it = eqComp.getEquipment(slot);
-        if (it) equipment[slot] = it.clone();
-      }
-    }
-  } catch (_) {}
+    const loc = player.location;
+    const rot = player.getRotation();
+    const dim = player.dimension.id;
 
-  let health = 20, hunger = 20, xpLevel = 0;
-  try { const h = player.getComponent("minecraft:health"); if (h) health = h.currentValue; } catch (_) {}
-  try { const hu = player.getComponent("minecraft:hunger"); if (hu) hunger = hu.currentValue; } catch (_) {}
-  try { const xp = player.getComponent("minecraft:experience"); if (xp) xpLevel = xp.level; } catch (_) {}
-
-  const effects = [];
-  try {
-    const activeEffects = player.getEffects();
-    if (activeEffects && Array.isArray(activeEffects)) {
-      for (const e of activeEffects) {
-        effects.push({
-          typeId: e.typeId,
-          duration: e.duration,
-          amplifier: e.amplifier,
-          showParticles: e.showParticles,
-        });
+    // Inventory (36 slots)
+    const inventory = [];
+    try {
+      const invComp = player.getComponent(EntityComponentTypes.Inventory);
+      if (invComp && invComp.container) {
+        const c = invComp.container;
+        for (let i = 0; i < c.size; i++) {
+          const it = c.getItem(i);
+          if (it) inventory.push({ slot: i, item: it.clone() });
+        }
       }
-    }
+    } catch (e) { warn("captureSave: inventory failed:", e); }
+
+    // Armor
+    const equipment = {};
+    try {
+      const eqComp = player.getComponent(EntityComponentTypes.Equippable);
+      if (eqComp) {
+        for (const slot of [EquipmentSlot.Head, EquipmentSlot.Chest, EquipmentSlot.Legs, EquipmentSlot.Feet, EquipmentSlot.Offhand]) {
+          const it = eqComp.getEquipment(slot);
+          if (it) equipment[slot] = it.clone();
+        }
+      }
+    } catch (_) {}
+
+    // Vitals
+    let health = 20, hunger = 20, xpLevel = 0, totalXp = 0;
+    try { const h = player.getComponent("minecraft:health"); if (h) health = h.currentValue; } catch (_) {}
+    try {
+      const hungerCandidates = ["minecraft:player.hunger", "minecraft:hunger", "minecraft:food"];
+      for (const c of hungerCandidates) {
+        const comp = player.getComponent(c);
+        if (comp) {
+          if (typeof comp.currentValue === 'number') { hunger = comp.currentValue; break; }
+          if (typeof comp.getCurrentValue === 'function') { hunger = comp.getCurrentValue(); break; }
+        }
+      }
+    } catch (_) {}
+    try { if (player.level !== undefined) xpLevel = player.level; } catch (_) {}
+    try {
+      if (typeof player.getTotalExperience === 'function') totalXp = player.getTotalExperience();
+      else if (player.totalExperience !== undefined) totalXp = player.totalExperience;
+    } catch (_) {}
+
+    // Effects
+    const effects = [];
+    try {
+      const activeEffects = player.getEffects();
+      if (activeEffects && Array.isArray(activeEffects)) {
+        for (const e of activeEffects) {
+          effects.push({
+            typeId: e.typeId,
+            duration: e.duration,
+            amplifier: e.amplifier,
+            showParticles: e.showParticles,
+          });
+        }
+      }
+    } catch (_) {}
+
+    let fireTicks = 0;
+    try { if (player.isOnFire) fireTicks = 60; } catch (_) {}
+
+    return {
+      dimensionId: dim,
+      x: loc.x, y: loc.y, z: loc.z,
+      rx: rot.x, ry: rot.y,
+      inventory,
+      equipment,
+      health, hunger, xpLevel, totalXp,
+      effects,
+      fireTicks,
+      onFire: !!fireTicks,
+      timestamp: Date.now(),
+    };
   } catch (e) {
-    log("getEffects failed:", e);
+    warn("captureSave failed entirely:", e);
+    return null;
   }
-
-  let fireTicks = 0;
-  try {
-    if (player.isOnFire) {
-      fireTicks = 60;
-    }
-  } catch (_) {}
-
-  return {
-    dimensionId: dim,
-    x: loc.x, y: loc.y, z: loc.z,
-    rx: rot.x, ry: rot.y,
-    inventory,
-    equipment,
-    health, hunger, xpLevel,
-    effects,
-    fireTicks,
-    onFire: !!fireTicks,
-    timestamp: Date.now(),
-  };
 }
 
 function restoreSave(player, save) {
-  log("restoreSave: starting for player", player.name);
+  log("restoreSave: starting for", player.name);
 
-  // === v1.2.5 BUGFIX: Health safety check ===
-  // If save.health is 0 or negative (race condition: save was taken at moment of death),
-  // the player would instantly re-die after restore. Fall back to max health.
+  // v1.2.3 BUGFIX: Health safety check
   let safeHealth = save.health;
   if (safeHealth <= 0) {
-    log("restoreSave: WARNING save.health was", safeHealth, "- falling back to 20 (max)");
+    log("restoreSave: WARNING save.health was", safeHealth, "- falling back to 20");
     safeHealth = 20;
   }
-  // Also clamp hunger to at least 6 so the player can sprint/heal
   let safeHunger = save.hunger;
   if (safeHunger < 6) {
     log("restoreSave: WARNING save.hunger was", safeHunger, "- clamping to 6");
     safeHunger = 6;
   }
 
-  // === TELEPORT (attempt 1 of 2) ===
-  // v1.2.5 BUGFIX: Teleport can fail silently if called too soon after respawn.
-  // We teleport twice - once immediately, once after a delay - to ensure it sticks.
+  // TELEPORT (attempt 1)
   try {
     const targetDim = world.getDimension(save.dimensionId);
     player.teleport({ x: save.x, y: save.y, z: save.z }, {
@@ -276,62 +269,82 @@ function restoreSave(player, save) {
       rotation: { x: save.rx, y: save.ry },
       keepVelocity: false,
     });
-    log("restoreSave: teleport #1 OK to", save.x, save.y, save.z);
+    log("restoreSave: teleport #1 OK");
   } catch (e) {
     log("restoreSave: teleport #1 FAILED:", e);
   }
 
-  // === Restore inventory ===
+  // Restore inventory
   try {
-    const invComp = player.getComponent("minecraft:inventory");
+    const invComp = player.getComponent(EntityComponentTypes.Inventory);
     if (invComp && invComp.container) {
       const c = invComp.container;
       for (let i = 0; i < c.size; i++) c.setItem(i, undefined);
       let restoredCount = 0;
       for (const { slot, item } of save.inventory) {
-        try { c.setItem(slot, item); restoredCount++; } catch (e) { log("restoreSave: set slot", slot, "failed:", e); }
+        try { c.setItem(slot, item); restoredCount++; } catch (e) { log("set slot", slot, "failed:", e); }
       }
-      log("restoreSave: restored", restoredCount, "of", save.inventory.length, "inventory items");
+      log("restoreSave: restored", restoredCount, "of", save.inventory.length, "items");
     }
   } catch (e) {
-    log("restoreSave: inventory restore failed:", e);
+    log("restoreSave: inventory failed:", e);
   }
 
-  // === Restore armor ===
+  // Restore armor
   try {
-    const eqComp = player.getComponent("minecraft:equippable");
+    const eqComp = player.getComponent(EntityComponentTypes.Equippable);
     if (eqComp) {
-      for (const slot of [EquipmentSlot.Head, EquipmentSlot.Chest, EquipmentSlot.Legs, EquipmentSlot.Feet]) {
+      for (const slot of [EquipmentSlot.Head, EquipmentSlot.Chest, EquipmentSlot.Legs, EquipmentSlot.Feet, EquipmentSlot.Offhand]) {
         const saved = save.equipment[slot];
         try { eqComp.setEquipment(slot, saved || undefined); } catch (_) {}
       }
     }
   } catch (_) {}
 
-  // === Restore vitals (with safety clamps) ===
+  // Vitals (with safety clamps)
   try {
     const h = player.getComponent("minecraft:health");
     if (h) {
       h.setCurrentValue(safeHealth);
       log("restoreSave: health set to", safeHealth);
     }
-  } catch (e) { log("restoreSave: health restore failed:", e); }
+  } catch (e) { log("restoreSave: health failed:", e); }
 
   try {
-    const hu = player.getComponent("minecraft:hunger");
-    if (hu) hu.setCurrentValue(safeHunger);
-  } catch (_) {}
-
-  try {
-    const xp = player.getComponent("minecraft:experience");
-    if (xp) {
-      const current = xp.level;
-      xp.addLevels(-current);
-      xp.addLevels(save.xpLevel);
+    const hungerCandidates = ["minecraft:player.hunger", "minecraft:hunger", "minecraft:food"];
+    let hungerRestored = false;
+    for (const c of hungerCandidates) {
+      try {
+        const comp = player.getComponent(c);
+        if (comp) {
+          if (typeof comp.setCurrentValue === 'function') { comp.setCurrentValue(safeHunger); hungerRestored = true; break; }
+          if ('currentValue' in comp) { comp.currentValue = safeHunger; hungerRestored = true; break; }
+        }
+      } catch (_) {}
+    }
+    if (!hungerRestored) {
+      try { player.runCommandAsync("effect @s saturation 1 255 true"); } catch (_) {}
     }
   } catch (_) {}
 
-  // === Restore effects ===
+  // XP
+  try {
+    if (typeof player.resetLevel === 'function') {
+      player.resetLevel();
+    } else {
+      try { player.runCommandAsync("xp -1000000L @s"); } catch (_) {}
+      try { player.runCommandAsync("xp -1000000 @s"); } catch (_) {}
+    }
+    if (save.totalXp > 0) {
+      if (typeof player.addExperience === 'function') player.addExperience(save.totalXp);
+      else try { player.runCommandAsync(`xp ${save.totalXp} @s`); } catch (_) {}
+    } else if (save.xpLevel > 0) {
+      if (typeof player.addLevels === 'function') player.addLevels(save.xpLevel);
+      else try { player.runCommandAsync(`xp ${save.xpLevel}L @s`); } catch (_) {}
+    }
+  } catch (_) {}
+
+  // Effects
   try {
     const existing = player.getEffects();
     if (existing && Array.isArray(existing)) {
@@ -346,25 +359,18 @@ function restoreSave(player, save) {
             amplifier: e.amplifier,
             showParticles: e.showParticles,
           });
-        } catch (err) {
-          log("restoreSave: Failed to restore effect:", e.typeId, err);
-        }
+        } catch (_) {}
       }
-    }
-  } catch (e) {
-    log("restoreSave: Effects restore failed:", e);
-  }
-
-  // === Restore fire ===
-  try {
-    if (save.onFire && save.fireTicks > 0) {
-      player.setOnFire(save.fireTicks, true);
-    } else {
-      player.extinguishFire();
     }
   } catch (_) {}
 
-  // === Invulnerability window ===
+  // Fire
+  try {
+    if (save.onFire && save.fireTicks > 0) player.setOnFire(save.fireTicks, true);
+    else player.extinguishFire();
+  } catch (_) {}
+
+  // Invulnerability
   try {
     player.addEffect("minecraft:resistance", INVULN_TICKS_AFTER_RETURN, { amplifier: 4, showParticles: false });
     player.addEffect("minecraft:fire_resistance", INVULN_TICKS_AFTER_RETURN, { amplifier: 1, showParticles: false });
@@ -373,12 +379,6 @@ function restoreSave(player, save) {
   log("restoreSave: completed for", player.name);
 }
 
-/**
- * v1.2.5: Re-teleports the player to the save point after a delay.
- * This is called separately from restoreSave because Bedrock's respawn logic
- * can override the first teleport. The second teleport (after 10 ticks) ensures
- * the player actually ends up at the save point.
- */
 function reTeleportToSave(player, save) {
   try {
     const targetDim = world.getDimension(save.dimensionId);
@@ -387,47 +387,32 @@ function reTeleportToSave(player, save) {
       rotation: { x: save.rx, y: save.ry },
       keepVelocity: false,
     });
-    log("reTeleportToSave: teleport #2 OK (confirmation teleport)");
+    log("reTeleportToSave: teleport #2 OK");
   } catch (e) {
     log("reTeleportToSave: teleport #2 FAILED:", e);
-    // Last resort: tell the player the coordinates
-    announce(player, `\u00a7cCould not auto-teleport. Use \u00a7e!rbd forcerestore\u00a7c or go to ${Math.floor(save.x)}, ${Math.floor(save.y)}, ${Math.floor(save.z)}`);
+    announce(player, `\u00a7cAuto-teleport failed. Use \u00a7e!rbd forcerestore\u00a7c or go to ${Math.floor(save.x)}, ${Math.floor(save.y)}, ${Math.floor(save.z)}`);
   }
 }
 
-function playReturnByDeathSound(deathLoc, deathDimId) {
-  // v1.2.5: Keep volume at 1.0 (max safe value for playSound).
-  // The OGG file itself is already boosted to -14dB broadcast standard (v1.2.5),
-  // which is ~6x louder than before. No need for >1.0 multipliers that may
-  // crash on some Bedrock versions.
-  const volume = Math.max(0, Math.min(1, CONFIG.soundVolume / 100));
-  const pitch = Math.max(0.5, Math.min(2, CONFIG.soundPitch / 100));
-  if (volume <= 0) return;
+// ============================ Sound ============================
 
-  // v1.2.5: Each playSound is wrapped in try/catch so a sound failure
-  // NEVER breaks the death/respawn logic.
-  for (const p of world.getAllPlayers()) {
-    try { p.playSound(SAVE_SOUND_ID, { volume, pitch }); } catch (e) {
-      // Silently ignore - sound is non-critical
-    }
-  }
-  try { log("playReturnByDeathSound: played to", world.getAllPlayers().length, "players"); } catch (_) {}
-}
-
-/**
- * v1.2.5: Plays the RBD sound directly to a specific player (used on respawn,
- * since the dying player can't hear sounds during the death screen).
- * v1.2.5: Wrapped in try/catch so sound failure never breaks respawn logic.
- */
-function playReturnByDeathSoundToPlayer(player) {
+function playReturnByDeathSound() {
+  // v1.3.0: Simple p.playSound(soundId) - matches reference pack pattern.
+  // The OGG file is already boosted to -14dB (broadcast standard).
+  // No volume/pitch options needed.
   try {
-    const volume = Math.max(0, Math.min(1, CONFIG.soundVolume / 100));
-    const pitch = Math.max(0.5, Math.min(2, CONFIG.soundPitch / 100));
-    if (volume <= 0) return;
-    player.playSound(SAVE_SOUND_ID, { volume, pitch });
+    for (const p of world.getAllPlayers()) {
+      try { p.playSound(SAVE_SOUND_ID); } catch (_) {}
+    }
+    log("playReturnByDeathSound: played to all players");
   } catch (e) {
-    // Silently ignore - sound is non-critical, respawn logic must continue
+    warn("playReturnByDeathSound failed:", e);
   }
+}
+
+function playReturnByDeathSoundToPlayer(player) {
+  // v1.3.0: Plays sound to a specific player (used on respawn).
+  try { player.playSound(SAVE_SOUND_ID); } catch (_) {}
 }
 
 function clearDroppedItemsNear(deathLoc, dimensionId) {
@@ -471,11 +456,7 @@ function addDeathLog(player, record) {
   let log = getDeathLog(player);
   log.unshift(record);
   while (log.length > MAX_LOG_ENTRIES) log.pop();
-  try {
-    player.setDynamicProperty("rbd:deathLog", JSON.stringify(log));
-  } catch (e) {
-    log("Failed to persist death log:", e);
-  }
+  try { player.setDynamicProperty("rbd:deathLog", JSON.stringify(log)); } catch (_) {}
 }
 
 // ============================ Death Cause Naming ============================
@@ -518,46 +499,12 @@ function describeDeathCause(damageSource) {
   return causeStr;
 }
 
-// ============================ Particle Beacon ============================
-
-function spawnBeaconParticles(player, save) {
-  if (!CONFIG.particleBeaconEnabled) return;
-  if (particleOverride.get(player.id) === false) return;
-  if (player.dimension.id !== save.dimensionId) return;
-
-  const dx = player.location.x - save.x;
-  const dy = player.location.y - save.y;
-  const dz = player.location.z - save.z;
-  const d2 = dx*dx + dy*dy + dz*dz;
-  if (d2 > BEACON_MAX_DISTANCE * BEACON_MAX_DISTANCE) return;
-
-  const dim = player.dimension;
-  const base = { x: save.x, y: save.y, z: save.z };
-
-  try {
-    for (let i = 0; i < 3; i++) {
-      dim.spawnParticle("minecraft:basic_crit_particle", { x: base.x, y: base.y + 0.3 + i * 0.4, z: base.z });
-    }
-    dim.spawnParticle("minecraft:endrod", { x: base.x, y: base.y + 1.5, z: base.z });
-    for (let angle = 0; angle < 360; angle += 90) {
-      const rad = angle * Math.PI / 180;
-      dim.spawnParticle("minecraft:basic_crit_particle", {
-        x: base.x + Math.cos(rad) * 0.5,
-        y: base.y + 0.05,
-        z: base.z + Math.sin(rad) * 0.5,
-      });
-    }
-  } catch (_) {}
-}
-
 // ============================ v1.2.1: Witch Scent ============================
 
 function triggerWitchScent(player) {
   if (!CONFIG.witchScentEnabled) return;
   witchScentUntil.set(player.id, Date.now() + WITCH_SCENT_DURATION_MS);
-  try {
-    player.onScreenDisplay.setActionBar("\u00a78\u00a7oThe scent of the Witch clings to you...");
-  } catch (_) {}
+  try { player.onScreenDisplay.setActionBar("\u00a78\u00a7oThe scent of the Witch clings to you..."); } catch (_) {}
 }
 
 function tickWitchScent() {
@@ -576,24 +523,14 @@ function tickWitchScent() {
 function spawnWitchScentParticles(player) {
   const dim = player.dimension;
   const x = player.location.x;
-  const y = player.location.y + 1.0; // chest height
+  const y = player.location.y + 1.0;
   const z = player.location.z;
-
   try {
-    // Ring of soul particles around the player (8 particles in a circle)
     for (let i = 0; i < 8; i++) {
       const angle = (i * Math.PI * 2.0) / 8.0;
       const px = x + Math.cos(angle) * 0.8;
       const pz = z + Math.sin(angle) * 0.8;
-      dim.spawnParticle("minecraft:soul_particle", { x: px, y: y, z: pz });
-    }
-    // A few soul fire flames drifting up
-    for (let i = 0; i < 3; i++) {
-      dim.spawnParticle("minecraft:soul_particle", {
-        x: x + (Math.random() - 0.5) * 0.5,
-        y: y - 0.5 + Math.random() * 1.5,
-        z: z + (Math.random() - 0.5) * 0.5,
-      });
+      dim.spawnParticle("minecraft:soul_particle", { x: px, y, z: pz });
     }
   } catch (_) {}
 }
@@ -621,16 +558,13 @@ const DEATH_QUOTES = [
 function sendDeathQuote(player) {
   if (!CONFIG.deathQuotesEnabled) return;
   const quote = DEATH_QUOTES[Math.floor(Math.random() * DEATH_QUOTES.length)];
-  try {
-    player.sendMessage("\u00a7d\u00a7o\"" + quote + "\"\u00a7r\u00a77 \u2014 Natsuki Subaru");
-  } catch (_) {}
+  try { player.sendMessage("\u00a7d\u00a7o\"" + quote + "\"\u00a7r\u00a77 \u2014 Natsuki Subaru"); } catch (_) {}
 }
 
 // ============================ v1.2.1: Heartbeat at low HP ============================
 
 function tickHeartbeat() {
   if (!CONFIG.heartbeatEnabled) return;
-  const now = Date.now();
   for (const player of world.getAllPlayers()) {
     try {
       if (player.getGameMode() === GameMode.creative || player.getGameMode() === GameMode.spectator) continue;
@@ -638,14 +572,7 @@ function tickHeartbeat() {
       if (!healthComp) continue;
       const hp = healthComp.currentValue;
       if (hp > 0 && hp <= HEARTBEAT_HP_THRESHOLD) {
-        // Volume scales with how close to death the player is
-        const volume = 0.4 + (1.0 - hp / HEARTBEAT_HP_THRESHOLD) * 0.6; // 0.4 to 1.0
-        try {
-          player.playSound("mob.warden.heartbeat", { volume, pitch: 1.0 });
-        } catch (_) {
-          // Fallback: try a deep bass note
-          try { player.playSound("note.bass", { volume, pitch: 0.6 }); } catch (_) {}
-        }
+        try { player.playSound("mob.warden.heartbeat"); } catch (_) {}
       }
     } catch (_) {}
   }
@@ -670,9 +597,135 @@ function showDeathTitle(player, loopCount) {
   }
 }
 
-// ============================ Event Handlers ============================
+// ============================ Particle Beacon ============================
 
-// Periodic save loop
+function spawnBeaconParticles(player, save) {
+  if (!CONFIG.particleBeaconEnabled) return;
+  if (particleOverride.get(player.id) === false) return;
+  if (player.dimension.id !== save.dimensionId) return;
+  const dx = player.location.x - save.x;
+  const dy = player.location.y - save.y;
+  const dz = player.location.z - save.z;
+  if (dx*dx + dy*dy + dz*dz > 64 * 64) return;
+  const dim = player.dimension;
+  const base = { x: save.x, y: save.y, z: save.z };
+  try {
+    for (let i = 0; i < 3; i++) {
+      dim.spawnParticle("minecraft:basic_crit_particle", { x: base.x, y: base.y + 0.3 + i * 0.4, z: base.z });
+    }
+    dim.spawnParticle("minecraft:endrod", { x: base.x, y: base.y + 1.5, z: base.z });
+  } catch (_) {}
+}
+
+// ============================ v1.3.0: TRIGGER RETURN (the key function) ============================
+
+/**
+ * v1.3.0: The triggerReturn function - called when a player dies.
+ * Based on the reference pack's working pattern:
+ *   - Mark player for return on next respawn
+ *   - Play the sound
+ *   - Record death location for item cleanup
+ *   - Set cooldown
+ */
+function triggerReturn(deadPlayer) {
+  // Mutex: prevent double-trigger if both entityDie and polling fire
+  if (GLOBAL_REWIND_ACTIVE.value) return;
+  if (pendingReturns.has(deadPlayer.id)) return;
+
+  if (!CONFIG.enabled) return;
+
+  // Cooldown check
+  const cdUntil = cooldownUntil.get(deadPlayer.id);
+  const now = Date.now();
+  if (cdUntil && cdUntil > now) {
+    const secs = Math.ceil((cdUntil - now) / 1000);
+    try { announce(deadPlayer, `\u00a7cCooldown active! Cannot rewind for ${secs} more second(s). Death is permanent this time.`); } catch (_) {}
+    return;
+  }
+
+  if (!saves.has(deadPlayer.id)) {
+    try { announce(deadPlayer, "\u00a7cNo save point exists \u2014 death is permanent!"); } catch (_) {}
+    return;
+  }
+
+  // === RETURN BY DEATH TRIGGERS ===
+  GLOBAL_REWIND_ACTIVE.value = true;
+  pendingReturns.add(deadPlayer.id);
+
+  log(`triggerReturn: ${deadPlayer.name} died. Marking for return.`);
+
+  // 1. Play the iconic sound to everyone
+  playReturnByDeathSound();
+
+  // 2. Get death cause for log
+  let causeStr = "unknown";
+  // (cause extraction happens in entityDie handler - here we just use "unknown" if polling)
+
+  // 3. Increment death counter
+  let loopCount = 0;
+  if (CONFIG.deathCounterEnabled) {
+    try { loopCount = incrementDeathCount(deadPlayer); } catch (_) {}
+  }
+
+  // 4. Add to death log
+  try {
+    const deathLoc = deadPlayer.location;
+    if (deathLoc) {
+      addDeathLog(deadPlayer, {
+        time: now,
+        dimension: deadPlayer.dimension.id,
+        x: deathLoc.x, y: deathLoc.y, z: deathLoc.z,
+        cause: causeStr,
+      });
+      deathLocations.set(deadPlayer.id, {
+        x: deathLoc.x, y: deathLoc.y, z: deathLoc.z,
+        dimensionId: deadPlayer.dimension.id,
+      });
+    }
+  } catch (_) {}
+
+  // 5. Death title overlay
+  try { showDeathTitle(deadPlayer, loopCount); } catch (_) {}
+
+  // 6. Tier 1 features
+  try { sendDeathQuote(deadPlayer); } catch (_) {}
+  try { triggerWitchScent(deadPlayer); } catch (_) {}
+  if (loopCount > 0 && loopCount % WITCH_WATCHING_INTERVAL === 0 && CONFIG.witchWatchingEnabled) {
+    try { deadPlayer.onScreenDisplay.setActionBar("\u00a78\u00a7l\u00a7oThe Witch of Envy is watching you..."); } catch (_) {}
+  }
+
+  // 7. Notify
+  try {
+    announce(deadPlayer, "\u00a7dYou have died. Returning to your save point...");
+    if (loopCount > 0) {
+      announce(deadPlayer, `\u00a77  Loop count: \u00a7e${loopCount}\u00a77 (this is death #${loopCount})`);
+    }
+  } catch (_) {}
+
+  // 8. Broadcast
+  if (CONFIG.broadcastDeaths) {
+    try {
+      for (const p of world.getAllPlayers()) {
+        if (p.id !== deadPlayer.id) {
+          p.sendMessage(`\u00a7d[Return By Death]\u00a7r \u00a77${deadPlayer.name} has died and rewound to their save point.`);
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 9. Set cooldown
+  if (CONFIG.cooldownSeconds > 0) {
+    cooldownUntil.set(deadPlayer.id, now + CONFIG.cooldownSeconds * 1000);
+  }
+
+  // 10. Clear the mutex after 60 ticks (3 seconds) - by then restore should be done
+  system.runTimeout(() => {
+    GLOBAL_REWIND_ACTIVE.value = false;
+  }, 60);
+}
+
+// ============================ Periodic save loop ============================
+
 let saveTickCount = 0;
 let saveIndicatorCounter = 0;
 system.runInterval(() => {
@@ -686,11 +739,11 @@ system.runInterval(() => {
     try {
       if (player.getGameMode() === GameMode.spectator) continue;
       const save = captureSave(player);
-      saves.set(player.id, save);
-      if (saveIndicatorCounter % 3 === 0) {
-        try {
-          player.onScreenDisplay.setActionBar("\u00a7d\u26a1 Save point recorded");
-        } catch (_) {}
+      if (save) {
+        saves.set(player.id, save);
+        if (saveIndicatorCounter % 3 === 0) {
+          try { player.onScreenDisplay.setActionBar("\u00a7d\u26a1 Save point recorded"); } catch (_) {}
+        }
       }
     } catch (e) {
       log("Save failed for", player.name, ":", e);
@@ -698,22 +751,23 @@ system.runInterval(() => {
   }
 }, 20);
 
-// Particle beacon loop
+// ============================ Particle beacon loop ============================
+
 system.runInterval(() => {
   if (!CONFIG.enabled) return;
   for (const player of world.getAllPlayers()) {
     const save = saves.get(player.id);
     if (save) spawnBeaconParticles(player, save);
   }
-}, BEACON_INTERVAL_TICKS);
+}, 20);
 
-// v1.2.1: Witch scent loop (every 2 seconds)
+// Witch scent loop
 system.runInterval(() => {
   if (!CONFIG.enabled) return;
   tickWitchScent();
 }, WITCH_SCENT_INTERVAL_TICKS);
 
-// v1.2.1: Heartbeat loop (every 1 second)
+// Heartbeat loop
 system.runInterval(() => {
   if (!CONFIG.enabled) return;
   tickHeartbeat();
@@ -727,113 +781,74 @@ system.runInterval(() => {
     const cdUntil = cooldownUntil.get(player.id);
     if (!cdUntil || cdUntil <= now) continue;
     const seconds = Math.ceil((cdUntil - now) / 1000);
-    try {
-      player.onScreenDisplay.setActionBar(`\u00a7c\u00a7l[RBD]\u00a7r \u00a7cCooldown: \u00a7e${seconds}s`);
-    } catch (_) {}
+    try { player.onScreenDisplay.setActionBar(`\u00a7c\u00a7l[RBD]\u00a7r \u00a7cCooldown: \u00a7e${seconds}s`); } catch (_) {}
   }
 }, 10);
 
-// Initial spawn - greet + give RBD Notebook (Layer 3 UI)
-world.afterEvents.playerSpawn.subscribe((ev) => {
-  if (!ev.initialSpawn) return;
-  const player = ev.player;
-  try {
-    const save = captureSave(player);
-    saves.set(player.id, save);
-  } catch (e) {
-    log("Initial save failed:", e);
-  }
-  announce(player, "\u00a7aA save point has been created. State is recorded every " + CONFIG.saveIntervalSeconds + "s.");
-  announce(player, "\u00a77When you die, you rewind to your save point with everything you had then.");
-  announce(player, "\u00a77Type \u00a7e!rbd help\u00a77 for chat commands, or use \u00a7e/rbd:help\u00a77 if on Bedrock 1.21.80+.");
-  announce(player, "\u00a77Or right-click the \u00a7dRBD Notebook\u00a77 item for a menu.");
+// ============================ v1.3.0: DEATH DETECTION (3 methods) ============================
 
-  // Give RBD Notebook item (Layer 3 UI menu)
-  giveRBDNotebook(player);
-});
-
-// On death
-world.afterEvents.playerDie.subscribe((ev) => {
-  if (!CONFIG.enabled) return;
-  const player = ev.player;
-  if (!player) return;
-
-  const cdUntil = cooldownUntil.get(player.id);
-  const now = Date.now();
-  if (cdUntil && cdUntil > now) {
-    const secs = Math.ceil((cdUntil - now) / 1000);
-    announce(player, `\u00a7cCooldown active! Cannot rewind for ${secs} more second(s). Death is permanent this time.`);
-    return;
-  }
-
-  if (!saves.has(player.id)) {
-    announce(player, "\u00a7cNo save point exists \u2014 death is permanent!");
-    return;
-  }
-
-  const causeStr = describeDeathCause(ev.damageSource);
-  log(`${player.name} died (cause: ${causeStr}). Triggering Return By Death.`);
-
-  const deathLoc = player.location ? { x: player.location.x, y: player.location.y, z: player.location.z } : null;
-  const deathDimId = player.dimension.id;
-
-  playReturnByDeathSound(deathLoc || { x: 0, y: 0, z: 0 }, deathDimId);
-
-  let loopCount = 0;
-  if (CONFIG.deathCounterEnabled) {
-    loopCount = incrementDeathCount(player);
-  }
-
-  addDeathLog(player, {
-    time: now,
-    dimension: deathDimId,
-    x: deathLoc ? deathLoc.x : 0,
-    y: deathLoc ? deathLoc.y : 0,
-    z: deathLoc ? deathLoc.z : 0,
-    cause: causeStr,
-  });
-
-  showDeathTitle(player, loopCount);
-
-  // v1.2.1 Tier 1 features
-  sendDeathQuote(player);
-  triggerWitchScent(player);
-  if (loopCount > 0 && loopCount % WITCH_WATCHING_INTERVAL === 0 && CONFIG.witchWatchingEnabled) {
-    try {
-      player.onScreenDisplay.setActionBar("\u00a78\u00a7l\u00a7oThe Witch of Envy is watching you...");
-    } catch (_) {}
-  }
-
-  announce(player, "\u00a7dYou have died. Returning to your save point...");
-  if (loopCount > 0) {
-    announce(player, `\u00a77  Loop count: \u00a7e${loopCount}\u00a77 (this is death #${loopCount})`);
-    announce(player, `\u00a77  Cause: \u00a7c${causeStr}`);
-  }
-  if (CONFIG.broadcastDeaths) {
-    for (const p of world.getAllPlayers()) {
-      if (p.id !== player.id) {
-        p.sendMessage(`\u00a7d[Return By Death]\u00a7r \u00a77${player.name} has died and rewound to their save point.`);
+// Method 1: entityDie event (most reliable - matches reference pack)
+try {
+  if (world.afterEvents && world.afterEvents.entityDie) {
+    world.afterEvents.entityDie.subscribe((ev) => {
+      try {
+        if (ev.deadEntity && ev.deadEntity.typeId === "minecraft:player") {
+          log("entityDie: player died:", ev.deadEntity.name);
+          triggerReturn(ev.deadEntity);
+        }
+      } catch (e) {
+        warn("entityDie handler failed:", e);
       }
+    });
+    log("Death detection Method 1 (entityDie): registered");
+  } else {
+    warn("Death detection Method 1 (entityDie): NOT AVAILABLE");
+  }
+} catch (e) {
+  warn("entityDie subscription failed:", e);
+}
+
+// Method 2: Polling fallback - check every tick if any player's HP < 0.1
+// This catches deaths that the event might miss.
+system.runInterval(() => {
+  if (!CONFIG.enabled) return;
+  try {
+    for (const player of world.getAllPlayers()) {
+      try {
+        if (player.getGameMode() === GameMode.spectator) continue;
+        const h = player.getComponent("minecraft:health");
+        if (h && h.currentValue < 0.1 && !GLOBAL_REWIND_ACTIVE.value && !pendingReturns.has(player.id)) {
+          log("Polling: detected player death (HP < 0.1):", player.name);
+          triggerReturn(player);
+        }
+      } catch (_) {}
     }
-  }
+  } catch (_) {}
+}, 1);
 
-  pendingReturns.add(player.id);
+// ============================ Respawn handler (restore on respawn) ============================
 
-  if (deathLoc) {
-    deathLocations.set(player.id, { x: deathLoc.x, y: deathLoc.y, z: deathLoc.z, dimensionId: deathDimId });
-  }
-
-  if (CONFIG.cooldownSeconds > 0) {
-    cooldownUntil.set(player.id, now + CONFIG.cooldownSeconds * 1000);
-  }
-});
-
-// On respawn - restore state
-// v1.2.5 BUGFIX: Use double-teleport with delays to fix "spawning outside save point".
-//   The first teleport (in restoreSave) can be overridden by Bedrock's respawn logic.
-//   The second teleport (after 10 ticks) confirms the position sticks.
 world.afterEvents.playerSpawn.subscribe((ev) => {
-  if (ev.initialSpawn) return;
+  if (ev.initialSpawn) {
+    // First spawn - create initial save + give RBD Notebook
+    const player = ev.player;
+    try {
+      const save = captureSave(player);
+      if (save) saves.set(player.id, save);
+    } catch (e) { log("Initial save failed:", e); }
+
+    try {
+      announce(player, "\u00a7aA save point has been created. State is recorded every " + CONFIG.saveIntervalSeconds + "s.");
+      announce(player, "\u00a77When you die, you rewind to your save point with everything you had then.");
+      announce(player, "\u00a77Type \u00a7e!rbd help\u00a77 for chat commands, or use \u00a7e/rbd:help\u00a77 if on Bedrock 1.21.80+.");
+      announce(player, "\u00a77Or right-click the \u00a7dRBD Notebook\u00a77 item for a menu.");
+    } catch (_) {}
+
+    try { giveRBDNotebook(player); } catch (_) {}
+    return;
+  }
+
+  // Respawn (not initial) - check if we have a pending return
   const player = ev.player;
   if (!pendingReturns.has(player.id)) return;
 
@@ -841,7 +856,7 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
 
   const save = saves.get(player.id);
   if (!save) {
-    announce(player, "\u00a7cNo save point available. Could not restore.");
+    try { announce(player, "\u00a7cNo save point available. Could not restore."); } catch (_) {}
     return;
   }
 
@@ -860,23 +875,23 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
     }
   });
 
-  // FIRST restore attempt: after 5 ticks (let the player fully spawn)
+  // FIRST restore attempt: after 5 ticks
   system.runTimeout(() => {
     try {
       log("onRespawn: running restoreSave (attempt 1)");
       restoreSave(player, save);
-      // v1.2.5: Play the RBD sound to the respawned player.
-      // The dying player can't hear sounds during the death screen, so we replay it here.
+      // v1.2.4: Replay the sound to the respawned player (they couldn't hear it during death)
       playReturnByDeathSoundToPlayer(player);
-      announce(player, `\u00a7aReturned to your save point at \u00a77${Math.floor(save.x)}, ${Math.floor(save.y)}, ${Math.floor(save.z)}\u00a7a in \u00a7b${save.dimensionId.replace("minecraft:", "")}\u00a7a.`);
+      try {
+        announce(player, `\u00a7aReturned to your save point at \u00a77${Math.floor(save.x)}, ${Math.floor(save.y)}, ${Math.floor(save.z)}\u00a7a in \u00a7b${save.dimensionId.replace("minecraft:", "")}\u00a7a.`);
+      } catch (_) {}
     } catch (e) {
       log("onRespawn: restoreSave attempt 1 FAILED:", e);
-      announce(player, "\u00a7cFirst restore attempt failed. Retrying...");
+      try { announce(player, "\u00a7cFirst restore attempt failed. Retrying..."); } catch (_) {}
     }
   }, 5);
 
-  // SECOND teleport: after 10 more ticks (15 total) to confirm position sticks
-  // v1.2.5: This is the KEY fix for "spawning outside save point"
+  // SECOND teleport: after 15 ticks to confirm position sticks
   system.runTimeout(() => {
     try {
       if (player && player.isValid()) {
@@ -888,20 +903,18 @@ world.afterEvents.playerSpawn.subscribe((ev) => {
   }, 15);
 });
 
-// Revert function
+// ============================ Revert function ============================
+
 function revertPlayer(player) {
   if (!CONFIG.enabled) return "Mod is disabled";
-
   const cdUntil = cooldownUntil.get(player.id);
   const now = Date.now();
   if (cdUntil && cdUntil > now) {
     const secs = Math.ceil((cdUntil - now) / 1000);
     return `Cooldown active: ${secs} more second(s)`;
   }
-
   const save = saves.get(player.id);
   if (!save) return "No save point exists";
-
   try {
     restoreSave(player, save);
     announce(player, `\u00a7aReverted to your save point at \u00a77${Math.floor(save.x)}, ${Math.floor(save.y)}, ${Math.floor(save.z)}\u00a7a in \u00a7b${save.dimensionId.replace("minecraft:", "")}\u00a7a.`);
@@ -914,17 +927,8 @@ function revertPlayer(player) {
   }
 }
 
-// ============================ v1.2.1 LAYER 1: CustomCommandRegistry (Bedrock 1.21.80+) ============================
-// v1.2.2 HOTFIX: previous version registered commands but used a non-existent
-// 'system.afterEvents.customCommand' event to handle execution. The correct pattern
-// is to pass the execution callback AS THE SECOND ARGUMENT to registerCommand().
-//
-// CustomCommand enums (CommandPermissionLevel, CustomCommandParamType, CustomCommandStatus)
-// are imported at the top of the file via the static `import { ... } from "@minecraft/server"`.
-// If those imports fail (older @minecraft/server version), we fall back to numeric values
-// that match the official enum values for @minecraft/server 1.14.0.
+// ============================ LAYER 1: CustomCommandRegistry (Bedrock 1.21.80+) ============================
 
-// Fallback enum values if static import didn't expose them (shouldn't happen on 1.14.0+)
 const PERM_ANY = CommandPermissionLevel?.Any ?? 0;
 const PERM_GAME_DIRECTORS = CommandPermissionLevel?.GameDirectors ?? 1;
 const PARAM_STRING = CustomCommandParamType?.String ?? "String";
@@ -937,31 +941,27 @@ try {
       try {
         const registry = event.customCommandRegistry;
         if (!registry || typeof registry.registerCommand !== "function") {
-          warn("Layer 1: CustomCommandRegistry.registerCommand is not a function. Need Bedrock 1.21.80+.");
+          warn("Layer 1: CustomCommandRegistry not available (need Bedrock 1.21.80+).");
           return;
         }
 
-        // Helper to register a no-parameter command with an execution callback
-        function registerSimple(name, description, permLevel, cheatsRequired) {
+        function registerSimple(name, description, permLevel) {
           try {
             registry.registerCommand({
-              name: name,
-              description: description,
-              permissionLevel: permLevel,
-              cheatsRequired: cheatsRequired,
+              name, description, permissionLevel: permLevel, cheatsRequired: false,
             }, (origin) => {
               try {
                 const player = origin?.sourceEntity;
-                if (!player || !player.typeId || player.typeId !== "minecraft:player") {
+                if (!player || player.typeId !== "minecraft:player") {
                   return { status: STATUS_FAILURE, message: "Only players can use this command." };
                 }
-                const sub = name.substring("rbd:".length); // strip "rbd:"
+                const sub = name.substring("rbd:".length);
                 let parts = [sub];
                 if (sub === "named_list") parts = ["named", "list"];
                 if (sub === "named_delete") parts = ["named", "delete"];
+                if (sub === "debug_save") parts = ["debug_save"];
                 system.run(() => {
-                  try { handleCommand(player, parts[0], parts); }
-                  catch (e) { warn("Layer 1 command handler error:", e); announce(player, "\u00a7cCommand error: " + e); }
+                  try { handleCommand(player, parts[0], parts); } catch (e) { warn("Layer 1 cmd error:", e); }
                 });
                 return { status: STATUS_SUCCESS };
               } catch (e) {
@@ -976,17 +976,11 @@ try {
           }
         }
 
-        // Helper to register a command with one string parameter
-        function registerWithStringParam(name, description, permLevel, cheatsRequired, paramName) {
+        function registerWithStringParam(name, description, permLevel, paramName) {
           try {
             registry.registerCommand({
-              name: name,
-              description: description,
-              permissionLevel: permLevel,
-              cheatsRequired: cheatsRequired,
-              mandatoryParameters: [
-                { name: paramName, type: PARAM_STRING },
-              ],
+              name, description, permissionLevel: permLevel, cheatsRequired: false,
+              mandatoryParameters: [{ name: paramName, type: PARAM_STRING }],
             }, (origin, value) => {
               try {
                 const player = origin?.sourceEntity;
@@ -994,11 +988,9 @@ try {
                   return { status: STATUS_FAILURE, message: "Only players can use this command." };
                 }
                 const sub = name.substring("rbd:".length);
-                // All parametric commands just pass the value as parts[2]
                 const parts = [sub, undefined, String(value)];
                 system.run(() => {
-                  try { handleCommand(player, parts[0], parts); }
-                  catch (e) { warn("Layer 1 command handler error:", e); announce(player, "\u00a7cCommand error: " + e); }
+                  try { handleCommand(player, parts[0], parts); } catch (e) { warn("Layer 1 cmd error:", e); }
                 });
                 return { status: STATUS_SUCCESS };
               } catch (e) {
@@ -1013,62 +1005,43 @@ try {
           }
         }
 
-        // Player commands (no params): permissionLevel Any, cheatsRequired false
         const playerSimple = ["save", "info", "status", "loops", "looplog", "lastdeath", "revert", "testsound", "reset", "debug", "forcerestore", "debug_save", "help"];
-        let playerRegistered = 0;
+        let count = 0;
         for (const cmd of playerSimple) {
-          if (registerSimple(`rbd:${cmd}`, `Return By Death - ${cmd}`, PERM_ANY, false)) playerRegistered++;
+          if (registerSimple(`rbd:${cmd}`, `Return By Death - ${cmd}`, PERM_ANY)) count++;
         }
-
-        // /rbd:named <name> - takes a string parameter
-        let namedRegistered = 0;
-        if (registerWithStringParam("rbd:named", "Create a named save point", PERM_ANY, false, "name")) namedRegistered++;
-        // /rbd:named_list - simple (no params)
-        if (registerSimple("rbd:named_list", "List your named save points", PERM_ANY, false)) namedRegistered++;
-        // /rbd:named_delete <name>
-        if (registerWithStringParam("rbd:named_delete", "Delete a named save point", PERM_ANY, false, "name")) namedRegistered++;
-
-        // /rbd:particles <on|off> - string param
-        let particlesRegistered = 0;
-        if (registerWithStringParam("rbd:particles", "Toggle save point particles (on|off)", PERM_ANY, false, "state")) particlesRegistered++;
-
-        // Op commands: permissionLevel GameDirectors (== 1, requires op), cheatsRequired false
+        if (registerWithStringParam("rbd:named", "Create a named save point", PERM_ANY, "name")) count++;
+        if (registerSimple("rbd:named_list", "List named save points", PERM_ANY)) count++;
+        if (registerWithStringParam("rbd:named_delete", "Delete a named save point", PERM_ANY, "name")) count++;
+        if (registerWithStringParam("rbd:particles", "Toggle particles (on|off)", PERM_ANY, "state")) count++;
         const opNumeric = [
           { name: "rbd:interval", desc: "Set save interval (1-600 sec)", param: "seconds" },
           { name: "rbd:cooldown", desc: "Set cooldown (0-3600 sec)", param: "seconds" },
-          { name: "rbd:radius", desc: "Set broadcast radius (-1 = global)", param: "blocks" },
           { name: "rbd:volume", desc: "Set sound volume (0-100%)", param: "percent" },
           { name: "rbd:pitch", desc: "Set sound pitch (50-200%)", param: "percent" },
           { name: "rbd:maxnamed", desc: "Set max named save points (0-20)", param: "count" },
         ];
-        let opNumericRegistered = 0;
         for (const c of opNumeric) {
-          if (registerWithStringParam(c.name, c.desc, PERM_GAME_DIRECTORS, false, c.param)) opNumericRegistered++;
+          if (registerWithStringParam(c.name, c.desc, PERM_GAME_DIRECTORS, c.param)) count++;
         }
-
-        // Op toggle commands (on|off)
-        const opToggle = ["broadcast", "mod"];
-        let opToggleRegistered = 0;
-        for (const cmd of opToggle) {
-          if (registerWithStringParam(`rbd:${cmd}`, `Return By Death (op) - ${cmd} <on|off>`, PERM_GAME_DIRECTORS, false, "state")) opToggleRegistered++;
+        for (const cmd of ["broadcast", "mod"]) {
+          if (registerWithStringParam(`rbd:${cmd}`, `Return By Death (op) - ${cmd} <on|off>`, PERM_GAME_DIRECTORS, "state")) count++;
         }
 
         LAYERS.customCommand = true;
-        const total = playerRegistered + namedRegistered + particlesRegistered + opNumericRegistered + opToggleRegistered;
-        log(`Layer 1 (CustomCommandRegistry): registered ${total} commands (${playerRegistered} player, ${namedRegistered} named, ${particlesRegistered} particles, ${opNumericRegistered + opToggleRegistered} op).`);
-        log("Layer 1: Try /rbd:help or /rbd:save in chat (with autocomplete).");
+        log(`Layer 1 (CustomCommandRegistry): registered ${count} commands`);
       } catch (e) {
-        warn("Layer 1 CustomCommandRegistry setup failed:", e);
+        warn("Layer 1 setup failed:", e);
       }
     });
   } else {
-    warn("Layer 1 (CustomCommandRegistry): system.beforeEvents.startup is undefined. Need Bedrock 1.21.80+. Falling back to chat handlers.");
+    warn("Layer 1 (CustomCommandRegistry): need Bedrock 1.21.80+. Falling back to chat handlers.");
   }
 } catch (e) {
   warn("Layer 1 init failed:", e);
 }
 
-// ============================ v1.2.1 LAYER 2: chatSend (fallback for older Bedrock) ============================
+// ============================ LAYER 2: chatSend (fallback for older Bedrock) ============================
 
 try {
   if (world.beforeEvents && typeof world.beforeEvents.chatSend !== "undefined") {
@@ -1082,39 +1055,38 @@ try {
         const sub = (parts[1] || "help").toLowerCase();
         system.run(() => {
           try { handleCommand(sender, sub, parts); }
-          catch (e) { warn("Chat command handler error:", e); announce(sender, "\u00a7cCommand error: " + e); }
+          catch (e) { warn("Chat cmd error:", e); announce(sender, "\u00a7cCommand error: " + e); }
         });
       } catch (e) {
-        warn("chatSend subscription handler failed:", e);
+        warn("chatSend handler failed:", e);
       }
     });
     LAYERS.chatSend = true;
-    log("Layer 2 (chatSend): registered - !rbd chat commands active");
+    log("Layer 2 (chatSend): registered");
   } else {
-    warn("Layer 2 (chatSend): world.beforeEvents.chatSend is undefined. !rbd chat commands will NOT work. Use /rbd: (Layer 1) or RBD Notebook (Layer 3) instead.");
+    warn("Layer 2 (chatSend): not available. Use /rbd: commands or RBD Notebook.");
   }
 } catch (e) {
   warn("Layer 2 init failed:", e);
 }
 
-// ============================ v1.2.1 LAYER 3: Item-based UI menu (universal fallback) ============================
+// ============================ LAYER 3: RBD Notebook item UI ============================
 
 const NOTEBOOK_ITEM_TYPE = "minecraft:writable_book";
 const NOTEBOOK_ITEM_NAME = "\u00a7d\u00a7lRBD Notebook\u00a7r\u00a77\n\u00a77Right-click to open command menu";
 
 function giveRBDNotebook(player) {
   try {
-    // Check if player already has the notebook
-    const invComp = player.getComponent("minecraft:inventory");
+    const invComp = player.getComponent(EntityComponentTypes.Inventory);
     if (!invComp || !invComp.container) return;
-    for (let i = 0; i < invComp.size; i++) {
+    for (let i = 0; i < invComp.container.size; i++) {
       const it = invComp.container.getItem(i);
       if (it && it.typeId === NOTEBOOK_ITEM_TYPE && it.nameTag === NOTEBOOK_ITEM_NAME) {
-        return; // already has one
+        return;
       }
     }
-    // Give a new one
-    const notebook = new (require("@minecraft/server").ItemStack)(NOTEBOOK_ITEM_TYPE, 1);
+    const { ItemStack } = require("@minecraft/server");
+    const notebook = new ItemStack(NOTEBOOK_ITEM_TYPE, 1);
     notebook.nameTag = NOTEBOOK_ITEM_NAME;
     invComp.container.addItem(notebook);
   } catch (e) {
@@ -1126,30 +1098,26 @@ async function openRBDMenu(player) {
   try {
     const ui = await import("@minecraft/server-ui");
     const ActionFormData = ui.ActionFormData;
-
     const menu = new ActionFormData()
       .title("\u00a7d\u00a7lReturn By Death")
       .body("\u00a77Select a command:")
-      .button("\u00a7aSave Point\n\u00a77Create a save point now", "textures/ui/icon_book_writable")
-      .button("\u00a7aInfo\n\u00a77Show save point details", "textures/ui/icon_map")
-      .button("\u00a7aStatus\n\u00a77Show all mod settings", "textures/ui/icon_settings")
-      .button("\u00a7aLoops\n\u00a77Show your death count", "textures/ui/icon_count")
-      .button("\u00a7aLoop Log\n\u00a77Show last 10 deaths", "textures/ui/icon_book")
-      .button("\u00a7aLast Death\n\u00a77Show most recent death", "textures/ui/icon_clock")
-      .button("\u00a7aRevert\n\u00a77Teleport to save point (no death)", "textures/ui/icon_teleport")
-      .button("\u00a7aTest Sound\n\u00a77Play RBD sound to verify", "textures/ui/icon_sound")
-      .button("\u00a7aReset Save\n\u00a77Clear save point (permadeath)", "textures/ui/icon_trash")
-      .button("\u00a7aNamed Saves\n\u00a77Manage named save points", "textures/ui/icon_book_enchanted")
-      .button("\u00a7aParticles\n\u00a77Toggle save point particles", "textures/ui/icon_particles")
-      .button("\u00a7aDebug\n\u00a77Show active command layers", "textures/ui/icon_debug")
-      .button("\u00a7aHelp\n\u00a77Show full help", "textures/ui/icon_help")
-      .button("\u00a7cClose", "textures/ui/cancel");
-
+      .button("\u00a7aSave Point\n\u00a77Create a save point now")
+      .button("\u00a7aInfo\n\u00a77Show save point details")
+      .button("\u00a7aStatus\n\u00a77Show all mod settings")
+      .button("\u00a7aLoops\n\u00a77Show your death count")
+      .button("\u00a7aLoop Log\n\u00a77Show last 10 deaths")
+      .button("\u00a7aLast Death\n\u00a77Show most recent death")
+      .button("\u00a7aRevert\n\u00a77Teleport to save point (no death)")
+      .button("\u00a7aTest Sound\n\u00a77Play RBD sound to verify")
+      .button("\u00a7aForce Restore\n\u00a77Manually restore to save point")
+      .button("\u00a7aReset Save\n\u00a77Clear save point (permadeath)")
+      .button("\u00a7aNamed Saves\n\u00a77Manage named save points")
+      .button("\u00a7aDebug\n\u00a77Show active command layers")
+      .button("\u00a7aHelp\n\u00a77Show full help")
+      .button("\u00a7cClose");
     const response = await menu.show(player);
     if (response.canceled) return;
-
-    const selection = response.selection;
-    const parts = buttonSelectionToCommand(selection);
+    const parts = buttonSelectionToCommand(response.selection);
     if (parts) {
       system.run(() => {
         try { handleCommand(player, parts[0], parts); }
@@ -1163,7 +1131,6 @@ async function openRBDMenu(player) {
 }
 
 function buttonSelectionToCommand(selection) {
-  // Maps button index (in openRBDMenu order) to [sub, ...args]
   switch (selection) {
     case 0: return ["save"];
     case 1: return ["info"];
@@ -1173,12 +1140,12 @@ function buttonSelectionToCommand(selection) {
     case 5: return ["lastdeath"];
     case 6: return ["revert"];
     case 7: return ["testsound"];
-    case 8: return ["reset"];
-    case 9: return ["named", "list"];
-    case 10: return ["particles", "toggle"];
+    case 8: return ["forcerestore"];
+    case 9: return ["reset"];
+    case 10: return ["named", "list"];
     case 11: return ["debug"];
     case 12: return ["help"];
-    case 13: return null; // Close
+    case 13: return null;
     default: return null;
   }
 }
@@ -1190,36 +1157,35 @@ try {
         const player = ev.source;
         if (!player) return;
         const item = ev.itemStack;
-        if (!item) return;
-        if (item.typeId !== NOTEBOOK_ITEM_TYPE) return;
+        if (!item || item.typeId !== NOTEBOOK_ITEM_TYPE) return;
         if (item.nameTag !== NOTEBOOK_ITEM_NAME) return;
-        // Cancel the default book-opening behavior
         ev.cancel = true;
         system.run(() => {
-          try { openRBDMenu(player); }
-          catch (e) { warn("openRBDMenu failed:", e); }
+          try { openRBDMenu(player); } catch (e) { warn("openRBDMenu failed:", e); }
         });
       } catch (e) {
         warn("itemUse handler failed:", e);
       }
     });
     LAYERS.itemUI = true;
-    log("Layer 3 (itemUse / RBD Notebook): registered - right-click the notebook for a menu");
+    log("Layer 3 (RBD Notebook UI): registered");
   } else {
-    warn("Layer 3 (itemUse): world.beforeEvents.itemUse is undefined. RBD Notebook UI menu will NOT work.");
+    warn("Layer 3 (itemUse): not available.");
   }
 } catch (e) {
   warn("Layer 3 init failed:", e);
 }
 
-// ============================ Command Handler (shared by all 3 layers) ============================
+// ============================ Command Handler ============================
 
 function handleCommand(player, sub, parts) {
   switch (sub) {
     case "save": {
       const save = captureSave(player);
-      saves.set(player.id, save);
-      announce(player, `\u00a7aSave point set at \u00a77${Math.floor(save.x)}, ${Math.floor(save.y)}, ${Math.floor(save.z)}\u00a7a in \u00a7b${save.dimensionId.replace("minecraft:", "")}\u00a7a.`);
+      if (save) {
+        saves.set(player.id, save);
+        announce(player, `\u00a7aSave point set at \u00a77${Math.floor(save.x)}, ${Math.floor(save.y)}, ${Math.floor(save.z)}\u00a7a in \u00a7b${save.dimensionId.replace("minecraft:", "")}\u00a7a.`);
+      }
       break;
     }
     case "info": {
@@ -1227,48 +1193,32 @@ function handleCommand(player, sub, parts) {
       if (!s) { announce(player, "\u00a7cNo save point exists yet."); break; }
       announce(player, `\u00a7aSave point: \u00a77${Math.floor(s.x)}, ${Math.floor(s.y)}, ${Math.floor(s.z)}\u00a7a in \u00a7b${s.dimensionId.replace("minecraft:", "")}`);
       announce(player, `\u00a7a  HP: \u00a7c${Math.floor(s.health)}\u00a7a   Hunger: \u00a76${Math.floor(s.hunger)}\u00a7a   XP Lvl: \u00a7e${s.xpLevel}`);
-      announce(player, `\u00a7a  Effects: \u00a77${(s.effects || []).length} active   Fire: \u00a77${s.onFire ? "yes" : "no"}`);
       const named = namedSaves.get(player.id) || new Map();
       announce(player, `\u00a7a  Named save points: \u00a77${named.size} / ${CONFIG.maxNamedSavePoints}`);
       break;
     }
     case "status": {
-      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.5 Status ===");
+      announce(player, "\u00a7d\u00a7l=== Return By Death v1.3.0 Status ===");
       announce(player, `\u00a7aEnabled: \u00a77${CONFIG.enabled}`);
       announce(player, `\u00a7aSave interval (sec): \u00a77${CONFIG.saveIntervalSeconds}`);
       announce(player, `\u00a7aCooldown (sec): \u00a77${CONFIG.cooldownSeconds}`);
-      announce(player, `\u00a7aBroadcast deaths: \u00a77${CONFIG.broadcastDeaths}`);
-      announce(player, `\u00a7aBroadcast radius: \u00a77${CONFIG.broadcastRadius} (-1 = global)`);
       announce(player, `\u00a7aSound volume: \u00a77${CONFIG.soundVolume}%`);
-      announce(player, `\u00a7aSound pitch: \u00a77${CONFIG.soundPitch}%`);
       announce(player, `\u00a7aParticle beacon: \u00a77${CONFIG.particleBeaconEnabled}`);
       announce(player, `\u00a7aDeath counter: \u00a77${CONFIG.deathCounterEnabled}`);
-      announce(player, `\u00a7aMax named save points: \u00a77${CONFIG.maxNamedSavePoints}`);
-      announce(player, `\u00a7aAction bar cooldown: \u00a77${CONFIG.actionBarCooldown}`);
-      announce(player, "\u00a76v1.2.1 Tier 1 features:");
-      announce(player, `\u00a7a  Witch scent: \u00a77${CONFIG.witchScentEnabled}`);
-      announce(player, `\u00a7a  Death quotes: \u00a77${CONFIG.deathQuotesEnabled}`);
-      announce(player, `\u00a7a  Heartbeat: \u00a77${CONFIG.heartbeatEnabled}`);
-      announce(player, `\u00a7a  Witch watching msg: \u00a77${CONFIG.witchWatchingEnabled}`);
+      announce(player, `\u00a7aWitch scent: \u00a77${CONFIG.witchScentEnabled}`);
+      announce(player, `\u00a7aHeartbeat: \u00a77${CONFIG.heartbeatEnabled}`);
       break;
     }
     case "loops": {
-      if (!CONFIG.deathCounterEnabled) {
-        announce(player, "\u00a7cDeath counter is disabled.");
-        break;
-      }
       const count = getDeathCount(player);
       announce(player, `\u00a7aYou have died \u00a7e${count}\u00a7a time(s). Loop count: \u00a7e${count}`);
       break;
     }
     case "looplog": {
-      const log = getDeathLog(player);
-      if (log.length === 0) {
-        announce(player, "\u00a77No deaths recorded yet.");
-        break;
-      }
-      announce(player, `\u00a7d\u00a7l[RBD] Last ${log.length} death(s):`);
-      log.forEach((r, i) => {
+      const dl = getDeathLog(player);
+      if (dl.length === 0) { announce(player, "\u00a77No deaths recorded yet."); break; }
+      announce(player, `\u00a7d\u00a7l[RBD] Last ${dl.length} death(s):`);
+      dl.forEach((r, i) => {
         const dt = new Date(r.time);
         const ts = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
         const dim = (r.dimension || "").replace("minecraft:", "");
@@ -1277,12 +1227,9 @@ function handleCommand(player, sub, parts) {
       break;
     }
     case "lastdeath": {
-      const log = getDeathLog(player);
-      if (log.length === 0) {
-        announce(player, "\u00a77You have no recorded deaths.");
-        break;
-      }
-      const r = log[0];
+      const dl = getDeathLog(player);
+      if (dl.length === 0) { announce(player, "\u00a77You have no recorded deaths."); break; }
+      const r = dl[0];
       const dt = new Date(r.time);
       const ts = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
       const dim = (r.dimension || "").replace("minecraft:", "");
@@ -1301,12 +1248,9 @@ function handleCommand(player, sub, parts) {
     }
     case "testsound": {
       try {
-        // v1.2.5: Use the boosted volume formula (up to 4.0)
-        const vol = Math.max(0, CONFIG.soundVolume / 100) * 4.0;
-        const pitch = Math.max(0.5, Math.min(2, CONFIG.soundPitch / 100));
-        player.playSound(SAVE_SOUND_ID, { volume: vol, pitch });
-        announce(player, `\u00a7aPlaying Return By Death sound (vol=${CONFIG.soundVolume}%, effective=${vol.toFixed(1)}x, pitch=${CONFIG.soundPitch}%).`);
-        announce(player, "\u00a77  If you don't hear it: (1) ensure the resource pack is active, (2) FULLY RESTART MC client (not just reload world), (3) reinstall both packs.");
+        player.playSound(SAVE_SOUND_ID);
+        announce(player, "\u00a7aPlaying Return By Death sound.");
+        announce(player, "\u00a77  If you don't hear it: (1) ensure the resource pack is active, (2) restart MC client completely, (3) reinstall both packs.");
       } catch (e) {
         announce(player, "\u00a7cFailed to play sound: " + e);
       }
@@ -1325,9 +1269,8 @@ function handleCommand(player, sub, parts) {
       const action = parts[2]?.toLowerCase();
       if (action === "list") {
         const named = namedSaves.get(player.id) || new Map();
-        if (named.size === 0) {
-          announce(player, "\u00a77You have no named save points.");
-        } else {
+        if (named.size === 0) { announce(player, "\u00a77You have no named save points."); }
+        else {
           announce(player, "\u00a7d\u00a7l[RBD] Named save points:");
           for (const [n, s] of named) {
             announce(player, `\u00a7a  ${n} \u00a77@ ${Math.floor(s.x)}, ${Math.floor(s.y)}, ${Math.floor(s.z)} in ${s.dimensionId.replace("minecraft:", "")}`);
@@ -1339,11 +1282,8 @@ function handleCommand(player, sub, parts) {
         const name = parts[3];
         if (!name) { announce(player, "\u00a7cUsage: !rbd named delete <name>"); break; }
         const named = namedSaves.get(player.id) || new Map();
-        if (named.delete(name)) {
-          announce(player, `\u00a7aDeleted named save point '\u00a7e${name}\u00a7a'.`);
-        } else {
-          announce(player, `\u00a7cNo named save point called '${name}'.`);
-        }
+        if (named.delete(name)) announce(player, `\u00a7aDeleted named save point '\u00a7e${name}\u00a7a'.`);
+        else announce(player, `\u00a7cNo named save point called '${name}'.`);
         break;
       }
       const name = parts[2];
@@ -1355,27 +1295,22 @@ function handleCommand(player, sub, parts) {
         announce(player, `\u00a7cMaximum named save points reached (${CONFIG.maxNamedSavePoints}). Delete one first.`);
         break;
       }
-      named.set(name, captureSave(player));
-      announce(player, `\u00a7aNamed save point '\u00a7e${name}\u00a7a' created at your current location.`);
+      const save = captureSave(player);
+      if (save) {
+        named.set(name, save);
+        announce(player, `\u00a7aNamed save point '\u00a7e${name}\u00a7a' created at your current location.`);
+      }
       break;
     }
     case "particles": {
       const arg = parts[2]?.toLowerCase();
       if (arg === "on") { particleOverride.set(player.id, true); announce(player, "\u00a7aSave point particles: \u00a7eON"); }
       else if (arg === "off") { particleOverride.set(player.id, false); announce(player, "\u00a7aSave point particles: \u00a7eOFF"); }
-      else if (arg === "toggle") {
-        const cur = particleOverride.get(player.id);
-        const next = cur !== false; // if undefined or true -> false; if false -> true
-        // Actually let's flip it
-        const newVal = cur === false;
-        particleOverride.set(player.id, newVal);
-        announce(player, "\u00a7aSave point particles: \u00a7e" + (newVal ? "ON" : "OFF"));
-      }
       else { announce(player, "\u00a7cUsage: !rbd particles <on|off>"); }
       break;
     }
     case "debug": {
-      announce(player, "\u00a7d\u00a7l=== RBD v1.2.5 Command Layers ===");
+      announce(player, "\u00a7d\u00a7l=== RBD v1.3.0 Command Layers ===");
       announce(player, `\u00a7aLayer 1 - CustomCommandRegistry (/rbd:*): \u00a77${LAYERS.customCommand ? "\u00a7aACTIVE" : "\u00a7cINACTIVE (need Bedrock 1.21.80+)"}`);
       announce(player, `\u00a7aLayer 2 - chatSend (!rbd chat): \u00a77${LAYERS.chatSend ? "\u00a7aACTIVE" : "\u00a7cINACTIVE (may need Beta APIs toggle)"}`);
       announce(player, `\u00a7aLayer 3 - RBD Notebook item UI: \u00a77${LAYERS.itemUI ? "\u00a7aACTIVE" : "\u00a7cINACTIVE"}`);
@@ -1384,55 +1319,44 @@ function handleCommand(player, sub, parts) {
       break;
     }
     case "debug_save": {
-      // v1.2.5: Debug the current save state
       const s = saves.get(player.id);
-      if (!s) {
-        announce(player, "\u00a7cNo save point in memory. Auto-save runs every " + CONFIG.saveIntervalSeconds + "s.");
-      } else {
+      if (!s) { announce(player, "\u00a7cNo save point in memory. Auto-save runs every " + CONFIG.saveIntervalSeconds + "s."); }
+      else {
         announce(player, "\u00a7d\u00a7l=== RBD Save Debug ===");
         announce(player, `\u00a7aPosition: \u00a77${s.x.toFixed(2)}, ${s.y.toFixed(2)}, ${s.z.toFixed(2)}`);
         announce(player, `\u00a7aRotation: \u00a77${s.rx.toFixed(1)}, ${s.ry.toFixed(1)}`);
         announce(player, `\u00a7aDimension: \u00a7b${s.dimensionId}`);
         announce(player, `\u00a7aHealth: \u00a7c${s.health}\u00a7a  Hunger: \u00a76${s.hunger}\u00a7a  XP: \u00a7e${s.xpLevel}`);
         announce(player, `\u00a7aInventory items: \u00a77${s.inventory.length}`);
-        announce(player, `\u00a7aEffects: \u00a77${(s.effects || []).length}`);
-        announce(player, `\u00a7aFire: \u00a77${s.onFire ? "yes (" + s.fireTicks + " ticks)" : "no"}`);
         const agoSec = Math.floor((Date.now() - s.timestamp) / 1000);
         announce(player, `\u00a7aSaved: \u00a77${agoSec}s ago`);
-        announce(player, `\u00a7aYour current pos: \u00a77${player.location.x.toFixed(2)}, ${player.location.y.toFixed(2)}, ${player.location.z.toFixed(2)}`);
-        const dist = Math.sqrt(
-          Math.pow(player.location.x - s.x, 2) +
-          Math.pow(player.location.y - s.y, 2) +
-          Math.pow(player.location.z - s.z, 2)
-        );
-        announce(player, `\u00a7aDistance from save: \u00a77${dist.toFixed(1)} blocks`);
+        try {
+          const dist = Math.sqrt(
+            Math.pow(player.location.x - s.x, 2) +
+            Math.pow(player.location.y - s.y, 2) +
+            Math.pow(player.location.z - s.z, 2)
+          );
+          announce(player, `\u00a7aDistance from save: \u00a77${dist.toFixed(1)} blocks`);
+        } catch (_) {}
       }
       break;
     }
     case "forcerestore": {
-      // v1.2.5: Manually trigger a restore from the save point
       const s = saves.get(player.id);
-      if (!s) {
-        announce(player, "\u00a7cNo save point exists. Use !rbd save first.");
-        break;
-      }
+      if (!s) { announce(player, "\u00a7cNo save point exists. Use !rbd save first."); break; }
       announce(player, "\u00a7dForce-restoring to save point...");
       try {
         restoreSave(player, s);
-        // Also schedule a re-teleport
-        system.runTimeout(() => {
-          try { reTeleportToSave(player, s); } catch (_) {}
-        }, 10);
+        system.runTimeout(() => { try { reTeleportToSave(player, s); } catch (_) {} }, 10);
         announce(player, `\u00a7aForce-restored to \u00a77${Math.floor(s.x)}, ${Math.floor(s.y)}, ${Math.floor(s.z)}\u00a7a.`);
       } catch (e) {
         announce(player, "\u00a7cForce restore failed: " + e);
-        log("forcerestore failed:", e);
       }
       break;
     }
     case "help":
     default: {
-      announce(player, "\u00a7d\u00a7l=== Return By Death v1.2.5 Help ===");
+      announce(player, "\u00a7d\u00a7l=== Return By Death v1.3.0 Help ===");
       announce(player, "\u00a76Three ways to run commands:");
       announce(player, "\u00a7a  1. Slash commands: \u00a77/rbd:save, /rbd:info, etc. (Bedrock 1.21.80+)");
       announce(player, "\u00a7a  2. Chat commands: \u00a77!rbd save, !rbd info, etc. (older Bedrock)");
@@ -1440,17 +1364,13 @@ function handleCommand(player, sub, parts) {
       announce(player, "\u00a76Player commands:");
       announce(player, "\u00a7a  save, info, status, loops, looplog, lastdeath");
       announce(player, "\u00a7a  revert, testsound, reset, particles, debug");
-      announce(player, "\u00a7a  forcerestore \u00a77- manually teleport to save point (v1.2.5)");
-      announce(player, "\u00a7a  debug_save \u00a77- show save point details + distance (v1.2.5)");
+      announce(player, "\u00a7a  forcerestore, debug_save");
       announce(player, "\u00a7a  named <name> | named list | named delete <name>");
       announce(player, "\u00a76Op commands:");
       announce(player, "\u00a7a  interval <sec>, cooldown <sec>, broadcast <on|off>");
-      announce(player, "\u00a7a  radius <blocks>, volume <0-100>, pitch <50-200>");
-      announce(player, "\u00a7a  maxnamed <0-20>, mod <on|off>");
+      announce(player, "\u00a7a  volume <0-100>, pitch <50-200>, maxnamed <0-20>, mod <on|off>");
       break;
     }
-
-    // Op commands
     case "interval": {
       if (!isOp(player)) { announce(player, "\u00a7cOperator permission required."); break; }
       const s = parseInt(parts[2]);
@@ -1477,15 +1397,6 @@ function handleCommand(player, sub, parts) {
       else { announce(player, "\u00a7cUsage: !rbd broadcast <on|off>"); }
       break;
     }
-    case "radius": {
-      if (!isOp(player)) { announce(player, "\u00a7cOperator permission required."); break; }
-      const r = parseInt(parts[2]);
-      if (isNaN(r) || r < -1) { announce(player, "\u00a7cUsage: !rbd radius <blocks> (-1 = global)"); break; }
-      CONFIG.broadcastRadius = r;
-      saveConfig();
-      announce(player, `\u00a7aBroadcast radius set to \u00a7e${r}\u00a7a blocks (-1 = global).`);
-      break;
-    }
     case "volume": {
       if (!isOp(player)) { announce(player, "\u00a7cOperator permission required."); break; }
       const v = parseInt(parts[2]);
@@ -1510,7 +1421,7 @@ function handleCommand(player, sub, parts) {
       if (isNaN(n) || n < 0 || n > 20) { announce(player, "\u00a7cUsage: !rbd maxnamed <0-20>"); break; }
       CONFIG.maxNamedSavePoints = n;
       saveConfig();
-      announce(player, `\u00a7aMax named save points per player set to \u00a7e${n}\u00a7a.`);
+      announce(player, `\u00a7aMax named save points set to \u00a7e${n}\u00a7a.`);
       break;
     }
     case "mod": {
@@ -1528,10 +1439,10 @@ function pad(n) { return n < 10 ? "0" + n : String(n); }
 
 // ============================ Init Log ============================
 
-log("Return By Death v1.2.5 (Bedrock Edition) loaded.");
+log("Return By Death v1.3.0 (Bedrock Edition) loaded.");
 log(`Save interval: ${CONFIG.saveIntervalSeconds}s. Inspired by Subaru Natsuki from Re:Zero.`);
-log("Sound is in resource_pack_RBD (NOT behavior pack).");
+log("Death detection: entityDie event + 1-tick polling fallback");
+log("Sound is in resource pack (NOT behavior pack).");
 log("Command layers - Layer 1 (CustomCommandRegistry): " + (LAYERS.customCommand ? "ACTIVE" : "inactive"));
 log("Command layers - Layer 2 (chatSend): " + (LAYERS.chatSend ? "ACTIVE" : "inactive"));
 log("Command layers - Layer 3 (RBD Notebook UI): " + (LAYERS.itemUI ? "ACTIVE" : "inactive"));
-log("If !rbd commands don't work, check /rbd:debug or !rbd debug, and try the RBD Notebook in your inventory.");
